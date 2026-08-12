@@ -1,97 +1,119 @@
 import sqlite3
+from datetime import datetime, date
 from database.connection import get_connection
-from datetime import datetime 
-
 
 def buscar_producto_para_venta(criterio):
     """
-    Busca un producto por SKU, QR o coincidencia de nombre.
-    Retorna (éxito: bool, resultado: dict/str)
+    Busca un producto por código QR, SKU o nombre para agregarlo al carrito.
     """
     try:
         conn = get_connection()
         cursor = conn.cursor()
         
-        # Buscamos coincidencias exactas en SKU/QR, o parciales en el nombre
-        query = '''
-            SELECT id_producto, sku, nombre_producto, precio_venta_base, valor_final, stock_actual 
-            FROM productos 
-            WHERE sku = ? OR codigo_qr = ? OR nombre_producto LIKE ?
+        criterio_clean = criterio.strip()
+        query = """
+            SELECT id_producto, sku, codigo_qr, nombre_producto, 
+                   precio_venta_base, valor_final, stock_actual, unidad_medida
+            FROM productos
+            WHERE estado_producto = 'Activo' 
+              AND (codigo_qr = ? OR sku = ? OR nombre_producto LIKE ?)
             LIMIT 1
-        '''
+        """
+        cursor.execute(query, (criterio_clean, criterio_clean, f"%{criterio_clean}%"))
+        prod = cursor.fetchone()
         
-        # búsquedas parciales (ej: si buscas "Mouse", encuentra "Mousepad")
-        cursor.execute(query, (criterio, criterio, f'%{criterio}%'))
-        producto = cursor.fetchone()
-        
-        if producto:
-            if producto['stock_actual'] <= 0:
-                return False, f"El producto '{producto['nombre_producto']}' no tiene stock disponible."
+        if not prod:
+            return False, f"No se encontró ningún producto con '{criterio}'."
             
-            return True, dict(producto) 
-        else:
-            return False, "Producto no encontrado. Verifique el código o nombre."
-
+        es_dict = isinstance(prod, dict)
+        producto_data = {
+            "id_producto": prod["id_producto"] if es_dict else prod[0],
+            "sku": prod["sku"] if es_dict else prod[1],
+            "codigo_qr": prod["codigo_qr"] if es_dict else prod[2],
+            "nombre_producto": prod["nombre_producto"] if es_dict else prod[3],
+            "precio_venta_base": prod["precio_venta_base"] if es_dict else prod[4],
+            "valor_final": prod["valor_final"] if es_dict else prod[5],
+            "stock_actual": prod["stock_actual"] if es_dict else prod[6],
+            "unidad_medida": prod["unidad_medida"] if es_dict else prod[7]
+        }
+        
+        return True, producto_data
     except Exception as e:
-        return False, f"Error en la base de datos: {str(e)}"
+        return False, f"Error al buscar producto: {str(e)}"
     finally:
         if 'conn' in locals():
             conn.close()
-            
 
-def registrar_venta(carrito, turno="Mañana"):
+
+def registrar_venta_directa(carrito, medio_pago, id_terminal=1):
     """
-    Toma los items del carrito, crea la venta, guarda el detalle y descuenta el stock.
-    Todo en una sola transacción segura.
+    Registra la venta, descuenta stock e inserta el cobro en la tabla 'caja' en 1 sola transacción.
     """
+    if not carrito:
+        return False, "El carrito está vacío."
+        
     try:
         conn = get_connection()
         cursor = conn.cursor()
         
-        # Obtenemos la fecha y hora actual del sistema
-        ahora = datetime.now()
-        fecha_str = ahora.strftime("%Y-%m-%d")
-        hora_str = ahora.strftime("%H:%M:%S")
-        
-        # Calculamos los totales en el backend 
-        total_valor_final = sum(item['subtotal'] for item in carrito)
-        descuento_general = 0
-        total_monto = total_valor_final - descuento_general
-        
-        # 1. Insertamos la cabecera de la venta 
-        cursor.execute('''
-            INSERT INTO ventas (fecha, hora, total_valor_final, descuento_general, total_monto, turno)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (fecha_str, hora_str, total_valor_final, descuento_general, total_monto, turno))
-        
-        # Obtenemos el ID que SQLite le asignó automáticamente a esta nueva venta
-        id_venta = cursor.lastrowid 
-        
-        # 2. Insertamos cada producto en el detalle y descontamos stock 
+        total_valor_final = sum(float(item['subtotal']) for item in carrito)
+        total_monto = total_valor_final
+        fecha_actual = date.today().strftime('%Y-%m-%d')
+        hora_actual = datetime.now().strftime('%H:%M:%S')
+
+        # 1. Insertar Cabecera de Venta
+        query_venta = """
+            INSERT INTO ventas (
+                id_terminal, fecha, hora, turno, 
+                total_valor_final, descuento_general, total_monto
+            ) VALUES (?, ?, ?, 'General', ?, 0.0, ?)
+        """
+        cursor.execute(query_venta, (id_terminal, fecha_actual, hora_actual, total_valor_final, total_monto))
+        id_venta = cursor.lastrowid
+
+        # Queries para items y actualización de stock
+        query_item = """
+            INSERT INTO venta_items (
+                id_venta, id_producto, cantidad, precio_base, valor_final, subtotal
+            ) VALUES (?, ?, ?, ?, ?, ?)
+        """
+        query_stock = """
+            UPDATE productos 
+            SET stock_actual = ROUND(stock_actual - ?, 3) 
+            WHERE id_producto = ?
+        """
+
+        # 2. Registrar Ítems y Descontar Inventario
         for item in carrito:
-            # Guardar el item de la venta
-            cursor.execute('''
-                INSERT INTO venta_items (id_venta, id_producto, cantidad, precio_base, valor_final, subtotal)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (id_venta, item['id_producto'], item['cantidad'], item['precio_base'], item['valor_final'], item['subtotal']))
-            
-            # Descontar el stock del inventario
-            cursor.execute('''
-                UPDATE productos 
-                SET stock_actual = stock_actual - ? 
-                WHERE id_producto = ?
-            ''', (item['cantidad'], item['id_producto']))
-            
-        # guardamos los cambios (Transacción exitosa)
+            cant = float(item['cantidad'])
+            prod_id = int(item['id_producto'])
+
+            cursor.execute(query_item, (
+                id_venta, 
+                prod_id, 
+                cant, 
+                float(item['precio_base']), 
+                float(item['valor_final']), 
+                float(item['subtotal'])
+            ))
+            cursor.execute(query_stock, (cant, prod_id))
+
+        # 3. Registrar Cobro Inmediato en Tabla 'caja'
+        query_caja = """
+            INSERT INTO caja (
+                id_venta, total_monto, descuento_final, total_pagar, 
+                medio_pago, impuesto_monto, monto_venta, descuentos_totales
+            ) VALUES (?, ?, 0.0, ?, ?, 0.0, ?, 0.0)
+        """
+        cursor.execute(query_caja, (id_venta, total_monto, total_monto, medio_pago, total_monto))
+
         conn.commit()
         return True, id_venta
-        
+
     except Exception as e:
-        # Si algo falló, deshacemos todos los cambios para no corromper la BD
         if 'conn' in locals():
-            conn.rollback() 
-        return False, f"Error al registrar la venta: {str(e)}"
-        
+            conn.rollback()
+        return False, f"Error al procesar la venta directa: {str(e)}"
     finally:
         if 'conn' in locals():
             conn.close()
