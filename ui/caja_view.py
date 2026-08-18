@@ -1,256 +1,208 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                               QLabel, QFrame, QMessageBox, QInputDialog, QListWidget)
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
+                               QPushButton, QLabel, QTableWidget, QTableWidgetItem, 
+                               QHeaderView, QFrame, QAbstractItemView)
 from PySide6.QtCore import Qt
-
-from services.caja_service import obtener_arqueo_actual
 
 class CajaView(QWidget):
     def __init__(self):
         super().__init__()
-        
-        self.fondo_inicial = 50000.0  # Fondo base inicial para sencillos/vueltos
-        self.movimientos = []          # Registro de entradas/salidas manuales de dinero
-        
+
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(20)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(18)
 
-        # --- PANEL IZQUIERDO: Resumen de Arqueo en Tiempo Real ---
-        left_layout = QVBoxLayout()
-        left_layout.setSpacing(15)
+        # ==========================================
+        # COLUMNA IZQUIERDA: ESTADO Y MOVIMIENTOS
+        # ==========================================
+        col_izq = QVBoxLayout()
+        col_izq.setSpacing(16)
 
-        lbl_titulo = QLabel("📊 Estado Financiero de la Caja (Turno Activo)")
-        lbl_titulo.setStyleSheet("font-size: 18px; font-weight: bold; color: #FFFFFF;")
-        left_layout.addWidget(lbl_titulo)
-
-        # Tarjetas de Totales por Medio de Pago
-        grid_frame = QFrame()
-        grid_frame.setStyleSheet("""
-            QFrame { background-color: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 12px; }
-            QLabel { border: none; }
+        # 1. Encabezado con Estado
+        header_layout = QHBoxLayout()
+        lbl_titulo = QLabel("📊 Control y Estado Financiero de Caja")
+        lbl_titulo.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold;")
+        
+        lbl_estado = QLabel("🟢 TURNO ACTIVO")
+        lbl_estado.setStyleSheet("""
+            background-color: #2E7D32; color: #FFFFFF; 
+            padding: 4px 10px; border-radius: 6px; 
+            font-size: 11px; font-weight: bold;
         """)
-        grid_layout = QVBoxLayout(grid_frame)
-        grid_layout.setContentsMargins(20, 20, 20, 20)
-        grid_layout.setSpacing(12)
+        header_layout.addWidget(lbl_titulo)
+        header_layout.addStretch()
+        header_layout.addWidget(lbl_estado)
+        col_izq.addLayout(header_layout)
 
-        self.lbl_fondo_inicial = QLabel("💵 Fondo Base Inicial (Sencillo): $50.000")
-        self.lbl_efectivo = QLabel("💵 Recaudado en Efectivo: $0")
-        self.lbl_debito = QLabel("💳 Recaudado en Débito: $0")
-        self.lbl_credito = QLabel("💳 Recaudado en Crédito: $0")
-        self.lbl_transferencia = QLabel("📲 Recaudado en Transferencia: $0")
-        self.lbl_total_esperado = QLabel("💰 Total Esperado en Caja: $50.000")
+        # 2. Grid de Métricas Financieras (Tarjetas)
+        grid_kpi = QGridLayout()
+        grid_kpi.setSpacing(12)
 
-        for lbl in [self.lbl_fondo_inicial, self.lbl_efectivo, self.lbl_debito, 
-                    self.lbl_credito, self.lbl_transferencia]:
-            lbl.setStyleSheet("font-size: 14px; color: #333344; padding: 6px; background-color: #F8F8FC; border-radius: 6px;")
+        self.card_fondo = self.crear_card_metrica("Fondo Base Inicial", "$50.000", "#BFA2DB")
+        self.card_efectivo = self.crear_card_metrica("Efectivo Total en Caja", "$50.000", "#81C784")
+        self.card_debito = self.crear_card_metrica("Recaudado Débito", "$0", "#64B5F6")
+        self.card_credito = self.crear_card_metrica("Recaudado Crédito", "$0", "#4DD0E1")
+        self.card_transf = self.crear_card_metrica("Recaudado Transferencia", "$0", "#BA68C8")
 
-        self.lbl_total_esperado.setStyleSheet("""
-            font-size: 22px; 
-            font-weight: bold; 
-            color: #9370DB; 
-            background-color: #E6E6FA; 
-            padding: 12px; 
-            border-radius: 8px;
-            margin-top: 10px;
-        """)
-
-        grid_layout.addWidget(self.lbl_fondo_inicial)
-        grid_layout.addWidget(self.lbl_efectivo)
-        grid_layout.addWidget(self.lbl_debito)
-        grid_layout.addWidget(self.lbl_credito)
-        grid_layout.addWidget(self.lbl_transferencia)
-        grid_layout.addWidget(self.lbl_total_esperado)
-
-        left_layout.addWidget(grid_frame)
-
-        # Historial de Movimientos Manuales (Sangrías / Depósitos de dinero)
-        lbl_mov = QLabel("📝 Registros e Inyecciones de Efectivo:")
-        lbl_mov.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFFFFF;")
-        left_layout.addWidget(lbl_mov)
-
-        self.lista_movimientos = QListWidget()
-        self.lista_movimientos.setStyleSheet("""
-            QListWidget {
-                background-color: #FFFFFF;
-                border: 1px solid #E0E0E0;
+        grid_kpi.addWidget(self.card_fondo, 0, 0)
+        grid_kpi.addWidget(self.card_efectivo, 0, 1)
+        grid_kpi.addWidget(self.card_debito, 1, 0)
+        grid_kpi.addWidget(self.card_credito, 1, 1)
+        grid_kpi.addWidget(self.card_transf, 1, 2)
+        
+        # Banner Gran Total
+        self.banner_total = QFrame()
+        self.banner_total.setStyleSheet("""
+            QFrame {
+                background-color: #BFA2DB;
                 border-radius: 8px;
-                padding: 8px;
-                font-size: 13px;
-                color: #333;
+                padding: 10px 16px;
             }
         """)
-        left_layout.addWidget(self.lista_movimientos)
+        b_layout = QHBoxLayout(self.banner_total)
+        lbl_b_tit = QLabel("💰 Total Recaudado en el Turno:")
+        lbl_b_tit.setStyleSheet("color: #1E1E24; font-size: 15px; font-weight: bold;")
+        self.lbl_b_monto = QLabel("$50.000")
+        self.lbl_b_monto.setStyleSheet("color: #1E1E24; font-size: 20px; font-weight: 900;")
+        b_layout.addWidget(lbl_b_tit)
+        b_layout.addStretch()
+        b_layout.addWidget(self.lbl_b_monto)
 
-        # --- PANEL DERECHO: Acciones Operativas de Caja ---
-        right_frame = QFrame()
-        right_frame.setFixedWidth(340)
-        right_frame.setStyleSheet("""
-            QFrame { background-color: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 12px; } 
-            QLabel { border: none; }
+        grid_kpi.addWidget(self.banner_total, 0, 2)
+        col_izq.addLayout(grid_kpi)
+
+        # 3. Tabla de Auditoría de Movimientos
+        lbl_movs = QLabel("📋 Historial de Entradas, Salidas y Gastos del Turno")
+        lbl_movs.setStyleSheet("color: #FFFFFF; font-size: 14px; font-weight: bold;")
+        col_izq.addWidget(lbl_movs)
+
+        self.tabla_movs = QTableWidget(0, 5)
+        self.tabla_movs.setHorizontalHeaderLabels(["Hora", "Tipo Movimiento", "Monto", "Motivo / Detalle", "Usuario"])
+        self.tabla_movs.verticalHeader().setVisible(False)
+        self.tabla_movs.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tabla_movs.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tabla_movs.setAlternatingRowColors(True)
+
+        header = self.tabla_movs.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
+
+        self.tabla_movs.setColumnWidth(0, 80)
+        self.tabla_movs.setColumnWidth(1, 140)
+        self.tabla_movs.setColumnWidth(2, 110)
+        self.tabla_movs.setColumnWidth(4, 120)
+
+        self.tabla_movs.setStyleSheet("""
+            QTableWidget { 
+                background-color: #FFFFFF; 
+                alternate-background-color: #F8F8FC;
+                border: 1px solid #E0E0E0; 
+                border-radius: 8px;
+                font-size: 13px; 
+                color: #1E1E24; 
+                gridline-color: #EEEEEE;
+            }
+            QHeaderView::section { 
+                background-color: #2D2D3A; 
+                color: #FFFFFF;
+                padding: 8px; 
+                border: none; 
+                font-weight: bold; 
+                font-size: 12px;
+            }
         """)
-        right_layout = QVBoxLayout(right_frame)
-        right_layout.setContentsMargins(20, 20, 20, 20)
-        right_layout.setSpacing(14)
+        col_izq.addWidget(self.tabla_movs)
 
-        titulo_acciones = QLabel("Acciones de Caja")
-        titulo_acciones.setStyleSheet("font-size: 18px; font-weight: bold; color: #1E1E24;")
-        titulo_acciones.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        right_layout.addWidget(titulo_acciones)
+        layout.addLayout(col_izq, 3)
 
-        self.btn_ajustar_fondo = QPushButton("⚙️ Ajustar Fondo Base Inicial")
-        self.btn_ingresar_dinero = QPushButton("📥 Registrar Inyección de Efectivo")
-        self.btn_retirar_dinero = QPushButton("📤 Registrar Retiro / Sangría")
-        
-        estilo_btn_operativo = """
+        # ==========================================
+        # COLUMNA DERECHA: PANEL DE ACCIONES
+        # ==========================================
+        panel_acciones = QFrame()
+        panel_acciones.setMaximumWidth(280)
+        panel_acciones.setStyleSheet("""
+            QFrame {
+                background-color: #FFFFFF;
+                border-radius: 12px;
+                border: 1px solid #E0E0E0;
+            }
+        """)
+        panel_layout = QVBoxLayout(panel_acciones)
+        panel_layout.setContentsMargins(18, 20, 18, 20)
+        panel_layout.setSpacing(12)
+
+        lbl_tit_acc = QLabel("Acciones de Caja")
+        lbl_tit_acc.setStyleSheet("color: #1E1E24; font-size: 16px; font-weight: bold; border: none;")
+        lbl_tit_acc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        panel_layout.addWidget(lbl_tit_acc)
+
+        estilo_btn_accion = """
             QPushButton {
                 background-color: #F4F4F9;
                 color: #2D2D3A;
                 border: 1px solid #D1D1E0;
                 padding: 12px;
-                border-radius: 6px;
-                font-weight: bold;
+                border-radius: 8px;
                 font-size: 13px;
+                font-weight: bold;
+                text-align: left;
             }
-            QPushButton:hover { background-color: #BFA2DB; color: #1E1E24; }
+            QPushButton:hover { background-color: #E6E6FA; border-color: #BFA2DB; }
         """
 
-        for btn in [self.btn_ajustar_fondo, self.btn_ingresar_dinero, self.btn_retirar_dinero]:
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(estilo_btn_operativo)
-            right_layout.addWidget(btn)
+        self.btn_inyectar = QPushButton("➕  Ingresar Efectivo")
+        self.btn_retiro = QPushButton("➖  Registrar Retiro / Gasto")
+        self.btn_fondo = QPushButton("⚙️  Ajustar Fondo Base")
 
-        self.btn_ajustar_fondo.clicked.connect(self.ajustar_fondo_base)
-        self.btn_ingresar_dinero.clicked.connect(lambda: self.registrar_movimiento_efectivo("Inyección"))
-        self.btn_retirar_dinero.clicked.connect(lambda: self.registrar_movimiento_efectivo("Retiro"))
+        for b in [self.btn_inyectar, self.btn_retiro, self.btn_fondo]:
+            b.setStyleSheet(estilo_btn_accion)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            panel_layout.addWidget(b)
 
-        right_layout.addStretch()
+        panel_layout.addStretch()
 
-        # Botón Principal de Cierre de Caja
-        self.btn_cierre = QPushButton("🔒 Realizar Cierre de Caja / Turno")
+        # Botón Cierre de Turno
+        self.btn_cierre = QPushButton("🔒 Cerrar Caja / Turno")
         self.btn_cierre.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cierre.setStyleSheet("""
-            QPushButton { 
-                background-color: #BFA2DB; 
-                color: #1E1E24; 
-                border: none; 
-                padding: 16px; 
-                border-radius: 8px; 
-                font-size: 15px; 
-                font-weight: bold; 
+            QPushButton {
+                background-color: #BFA2DB;
+                color: #1E1E24;
+                border: none;
+                padding: 14px;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: bold;
             }
             QPushButton:hover { background-color: #A888CB; }
             QPushButton:pressed { background-color: #9370DB; color: white; }
         """)
-        self.btn_cierre.clicked.connect(self.ejecutar_cierre_caja)
-        right_layout.addWidget(self.btn_cierre)
+        panel_layout.addWidget(self.btn_cierre)
 
-        layout.addLayout(left_layout)
-        layout.addWidget(right_frame)
+        layout.addWidget(panel_acciones, 1)
 
-        self.actualizar_panel_caja()
+    def crear_card_metrica(self, titulo, valor, color_borde):
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: #2D2D3A;
+                border-radius: 8px;
+                border-left: 4px solid {color_borde};
+                padding: 8px 12px;
+            }}
+        """)
+        c_layout = QVBoxLayout(card)
+        c_layout.setContentsMargins(4, 4, 4, 4)
+        c_layout.setSpacing(2)
 
-    def showEvent(self, event):
-        """Refresco dinámico al abrir la pestaña 'Caja'."""
-        super().showEvent(event)
-        self.actualizar_panel_caja()
+        lbl_t = QLabel(titulo)
+        lbl_t.setStyleSheet("color: #A0A0B0; font-size: 11px; font-weight: bold; border: none;")
+        
+        lbl_v = QLabel(valor)
+        lbl_v.setStyleSheet("color: #FFFFFF; font-size: 16px; font-weight: bold; border: none;")
 
-    def actualizar_panel_caja(self):
-        exito, resumen = obtener_arqueo_actual()
-        if exito:
-            efectivo_ventas = resumen.get("Efectivo", 0.0)
-            debito = resumen.get("Débito", 0.0)
-            credito = resumen.get("Crédito", 0.0)
-            transf = resumen.get("Transferencia", 0.0)
-
-            # Cálculo de ajuste por inyecciones y retiros
-            ajustes_efectivo = sum(mov["monto"] for mov in self.movimientos)
-            efectivo_total_en_caja = self.fondo_inicial + efectivo_ventas + ajustes_efectivo
-            total_general_sistema = efectivo_total_en_caja + debito + credito + transf
-
-            self.lbl_fondo_inicial.setText(f"💵 Fondo Base Inicial: ${self.fondo_inicial:,.0f}".replace(',', '.'))
-            self.lbl_efectivo.setText(f"💵 Efectivo en Caja (Ventas + Fondo): ${efectivo_total_en_caja:,.0f}".replace(',', '.'))
-            self.lbl_debito.setText(f"💳 Recaudado en Débito: ${debito:,.0f}".replace(',', '.'))
-            self.lbl_credito.setText(f"💳 Recaudado en Crédito: ${credito:,.0f}".replace(',', '.'))
-            self.lbl_transferencia.setText(f"📲 Recaudado en Transferencia: ${transf:,.0f}".replace(',', '.'))
-            
-            self.lbl_total_esperado.setText(f"💰 Total Recaudado Turno: ${total_general_sistema:,.0f}".replace(',', '.'))
-
-    def ajustar_fondo_base(self):
-        monto, ok = QInputDialog.getDouble(
-            self, 
-            "Ajuste de Fondo Inicial", 
-            "Ingrese el monto base para dar sencillo ($):", 
-            value=self.fondo_inicial, 
-            minValue=0.0, 
-            maxValue=1000000.0, 
-            decimals=0
-        )
-        if ok:
-            self.fondo_inicial = monto
-            self.actualizar_panel_caja()
-
-    def registrar_movimiento_efectivo(self, tipo):
-        monto, ok = QInputDialog.getDouble(
-            self, 
-            f"Registro de {tipo}", 
-            f"Ingrese el monto del {tipo.lower()} en efectivo ($):", 
-            value=10000.0, 
-            minValue=100.0, 
-            maxValue=500000.0, 
-            decimals=0
-        )
-        if ok and monto > 0:
-            monto_real = monto if tipo == "Inyección" else -monto
-            self.movimientos.append({"tipo": tipo, "monto": monto_real})
-            
-            signo = "+" if tipo == "Inyección" else "-"
-            monto_str = f"${monto:,.0f}".replace(',', '.')
-            self.lista_movimientos.addItem(f"• [{tipo}] {signo}{monto_str}")
-            self.actualizar_panel_caja()
-
-    def ejecutar_cierre_caja(self):
-        exito, resumen = obtener_arqueo_actual()
-        if not exito:
-            QMessageBox.warning(self, "Error", "No se pudo obtener el arqueo para el cierre.")
-            return
-
-        efectivo_ventas = resumen.get("Efectivo", 0.0)
-        ajustes_efectivo = sum(mov["monto"] for mov in self.movimientos)
-        efectivo_esperado = self.fondo_inicial + efectivo_ventas + ajustes_efectivo
-
-        monto_fisico, ok = QInputDialog.getDouble(
-            self, 
-            "Cierre de Caja - Conteo Físico", 
-            f"Efectivo esperado en caja (Fondo + Ventas): ${efectivo_esperado:,.0f}\n\n"
-            f"Ingrese el dinero real contado en la caja ($):".replace(',', '.'),
-            value=efectivo_esperado,
-            minValue=0.0,
-            maxValue=10000000.0,
-            decimals=0
-        )
-
-        if ok:
-            diferencia = monto_fisico - efectivo_esperado
-            dif_str = f"${abs(diferencia):,.0f}".replace(',', '.')
-            
-            if diferencia == 0:
-                resultado_str = "✅ Cierre perfecto. Sin diferencias en efectivo."
-            elif diferencia > 0:
-                resultado_str = f"⚠️ Sobrante en caja: +{dif_str}"
-            else:
-                resultado_str = f"❌ Faltante en caja: -{dif_str}"
-
-            tot_ventas = resumen.get("Total", 0.0)
-
-            resumen_msg = (
-                f"📋 RESUMEN DE CIERRE DE CAJA\n\n"
-                f"• Fondo Inicial: ${self.fondo_inicial:,.0f}\n"
-                f"• Ventas en Efectivo: ${efectivo_ventas:,.0f}\n"
-                f"• Efectivo Esperado en Caja: ${efectivo_esperado:,.0f}\n"
-                f"• Conteo Físico Real: ${monto_fisico:,.0f}\n\n"
-                f"• Ventas Tarjetas/Transf: ${(tot_ventas - efectivo_ventas):,.0f}\n"
-                f"• TOTAL VENDIDO EN TURNO: ${tot_ventas:,.0f}\n\n"
-                f"CUADRATURA: {resultado_str}"
-            ).replace(',', '.')
-
-            QMessageBox.information(self, "Cierre de Caja Completado", resumen_msg)
+        c_layout.addWidget(lbl_t)
+        c_layout.addWidget(lbl_v)
+        return card

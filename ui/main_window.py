@@ -183,28 +183,35 @@ class MainWindow(QMainWindow):
         rol = self.usuario_actual.get("rol", "Vendedor")
 
         if rol == "Vendedor":
-            # El vendedor no tiene acceso a Inventario, Historial ni Gestión de usuarios
             self.btn_inventario.setVisible(False)
             self.btn_historial.setVisible(False)
             self.btn_gestionar_usuarios.setVisible(False)
-            
-            # Entra directo a la pantalla de Nueva Venta
             self.cambiar_vista(1, self.btn_venta)
         else:
-            # Administrador: Acceso a todos los módulos y opciones
             self.btn_inventario.setVisible(True)
             self.btn_historial.setVisible(True)
             self.btn_gestionar_usuarios.setVisible(True)
             self.cambiar_vista(0, self.btn_inventario)
 
     def cambiar_vista(self, indice, boton_activo):
-        """Cambia la vista activa y resalta el botón seleccionado."""
+        """Cambia la vista activa, resalta el botón y refresca los datos correspondientes."""
         self.stacked_widget.setCurrentIndex(indice)
+        
         for btn in self.botones_menu:
             if btn == boton_activo:
                 btn.setStyleSheet(self.estilo_activo)
             else:
                 btn.setStyleSheet(self.estilo_base)
+
+        # Disparar actualización en vivo según la pestaña a la que se ingresa
+        if indice == 0 and hasattr(self.vista_inventario, 'cargar_datos_tabla'):
+            self.vista_inventario.cargar_datos_tabla()
+        elif indice == 1 and hasattr(self.vista_venta, 'search_input'):
+            self.vista_venta.search_input.setFocus()
+        elif indice == 2 and hasattr(self.vista_caja, 'refrescar_datos'):
+            self.vista_caja.refrescar_datos()
+        elif indice == 3 and hasattr(self.vista_historial, 'cargar_ventas'):
+            self.vista_historial.cargar_ventas()
 
     def abrir_gestion_usuarios(self):
         """Abre el diálogo modal para crear, listar y desactivar cajeros/usuarios."""

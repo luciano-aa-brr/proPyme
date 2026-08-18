@@ -1,422 +1,688 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                               QLineEdit, QTableWidget, QTableWidgetItem, 
-                               QHeaderView, QLabel, QFrame, QMessageBox, 
-                               QInputDialog, QComboBox, QAbstractItemView)
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
+                               QPushButton, QLineEdit, QTableWidget, QTableWidgetItem, 
+                               QHeaderView, QLabel, QMessageBox, QFrame, 
+                               QAbstractItemView, QDialog)
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 
 from services.ventas_service import buscar_producto_para_venta, registrar_venta_directa
+
+class DialogoPeso(QDialog):
+    """Modal express para ingresar peso exacto en productos por KG/GR/LT."""
+    def __init__(self, nombre_producto, precio_unitario, unidad="KG", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Ingreso de Peso / Cantidad")
+        self.setFixedSize(360, 420)
+        self.setStyleSheet("background-color: #1E1E24; border-radius: 10px;")
+        
+        self.peso_ingresado = 1.0
+        self.precio_unit = precio_unitario
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        lbl_nombre = QLabel(f"⚖️ {nombre_producto}")
+        lbl_nombre.setStyleSheet("color: #FFFFFF; font-size: 16px; font-weight: bold;")
+        lbl_nombre.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_nombre.setWordWrap(True)
+
+        lbl_precio = QLabel(f"Precio por {unidad}: ${precio_unitario:,.0f}".replace(',', '.'))
+        lbl_precio.setStyleSheet("color: #BFA2DB; font-size: 13px; font-weight: bold;")
+        lbl_precio.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(lbl_nombre)
+        layout.addWidget(lbl_precio)
+
+        # Input de Peso
+        self.inp_peso = QLineEdit()
+        self.inp_peso.setPlaceholderText(f"Ej: 0.750 {unidad.lower()}")
+        self.inp_peso.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.inp_peso.setStyleSheet("""
+            QLineEdit {
+                background-color: #2D2D3A;
+                color: #FFFFFF;
+                border: 2px solid #BFA2DB;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 24px;
+                font-weight: bold;
+            }
+        """)
+        self.inp_peso.textChanged.connect(self.actualizar_subtotal_en_vivo)
+        self.inp_peso.returnPressed.connect(self.confirmar)
+        layout.addWidget(self.inp_peso)
+
+        self.lbl_subtotal_calculado = QLabel("Subtotal: $0")
+        self.lbl_subtotal_calculado.setStyleSheet("color: #81C784; font-size: 16px; font-weight: bold;")
+        self.lbl_subtotal_calculado.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.lbl_subtotal_calculado)
+
+        # Botonera numérica rápida
+        grid = QGridLayout()
+        grid.setSpacing(6)
+        teclas = [
+            ('1', 0, 0), ('2', 0, 1), ('3', 0, 2),
+            ('4', 1, 0), ('5', 1, 1), ('6', 1, 2),
+            ('7', 2, 0), ('8', 2, 1), ('9', 2, 2),
+            ('C', 3, 0), ('0', 3, 1), ('.', 3, 2)
+        ]
+        
+        for t, f, c in teclas:
+            btn = QPushButton(t)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            if t == 'C':
+                btn.setStyleSheet("background-color: #D32F2F; color: white; border-radius: 6px; padding: 10px; font-weight: bold; font-size: 15px;")
+                btn.clicked.connect(self.inp_peso.clear)
+            else:
+                btn.setStyleSheet("background-color: #2D2D3A; color: white; border-radius: 6px; padding: 10px; font-weight: bold; font-size: 15px;")
+                btn.clicked.connect(lambda _, txt=t: self.inp_peso.setText(self.inp_peso.text() + txt))
+            grid.addWidget(btn, f, c)
+
+        layout.addLayout(grid)
+
+        # Botón Aceptar
+        btn_ok = QPushButton("✔ Confirmar Peso")
+        btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_ok.setStyleSheet("""
+            QPushButton {
+                background-color: #BFA2DB; color: #1E1E24; border: none;
+                padding: 12px; border-radius: 8px; font-size: 14px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #A888CB; }
+        """)
+        btn_ok.clicked.connect(self.confirmar)
+        layout.addWidget(btn_ok)
+
+        self.inp_peso.setFocus()
+
+    def actualizar_subtotal_en_vivo(self):
+        try:
+            val = float(self.inp_peso.text().strip().replace(',', '.'))
+            sub = val * self.precio_unit
+            self.lbl_subtotal_calculado.setText(f"Subtotal: ${sub:,.0f}".replace(',', '.'))
+        except ValueError:
+            self.lbl_subtotal_calculado.setText("Subtotal: $0")
+
+    def confirmar(self):
+        try:
+            val = float(self.inp_peso.text().strip().replace(',', '.'))
+            if val > 0:
+                self.peso_ingresado = val
+                self.accept()
+            else:
+                QMessageBox.warning(self, "Valor Inválido", "El peso debe ser mayor a 0.")
+        except ValueError:
+            QMessageBox.warning(self, "Valor Inválido", "Ingresa un número válido (ej: 0.550).")
+
 
 class VentasView(QWidget):
     def __init__(self):
         super().__init__()
-        
-        self.carrito = [] 
-        
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(20)
 
-        # --- PANEL IZQUIERDO ---
-        left_layout = QVBoxLayout()
-        left_layout.setSpacing(12)
-        
+        self.carrito = []
+        self.medio_pago_seleccionado = "Efectivo"
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(18)
+
+        # ====================================================
+        # COLUMNA IZQUIERDA: ESCÁNER, TABLA CARRITO Y LIMPIEZA
+        # ====================================================
+        col_izq = QVBoxLayout()
+        col_izq.setSpacing(14)
+
+        # 1. Buscador y Escáner Continuo
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 Escanear código QR/SKU o buscar por nombre y presionar ENTER...")
+        self.search_input.setPlaceholderText("🔍  Escanear código de barras, SKU o escribir nombre...")
         self.search_input.setStyleSheet("""
             QLineEdit {
                 background-color: #2D2D3A;
                 color: #FFFFFF;
-                border: 1px solid #4A4A5A;
+                border: 2px solid #4A4A5A;
                 border-radius: 8px;
                 padding: 12px 16px;
                 font-size: 15px;
+                font-weight: bold;
             }
             QLineEdit:focus { border: 2px solid #BFA2DB; }
-            QLineEdit::placeholder { color: #8E8E9F; }
+            QLineEdit::placeholder { color: #8E8E9F; font-weight: normal; }
         """)
-        self.search_input.returnPressed.connect(self.procesar_busqueda)
-        left_layout.addWidget(self.search_input)
+        self.search_input.returnPressed.connect(self.procesar_escaneo_o_busqueda)
+        col_izq.addWidget(self.search_input)
 
-        self.tabla_carrito = QTableWidget(0, 6) 
-        self.tabla_carrito.setHorizontalHeaderLabels(["SKU", "Producto", "Cant. / Peso", "Precio Unit.", "Subtotal", "Acciones"])
-        
+        # 2. Tabla del Carrito de Compras
+        self.tabla_carrito = QTableWidget(0, 6)
+        self.tabla_carrito.setHorizontalHeaderLabels(["SKU", "Descripción del Producto", "Cant. / Peso", "Precio Unit.", "Subtotal", "Acción"])
+        self.tabla_carrito.verticalHeader().setVisible(False)
+        self.tabla_carrito.verticalHeader().setDefaultSectionSize(46)
         self.tabla_carrito.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tabla_carrito.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.tabla_carrito.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.tabla_carrito.setAlternatingRowColors(True)
 
         header = self.tabla_carrito.horizontalHeader()
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive) # SKU
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)     # Producto
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive) # Cantidad / Peso
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive) # Precio
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive) # Subtotal
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)       # Eliminar
+
+        self.tabla_carrito.setColumnWidth(0, 100)
+        self.tabla_carrito.setColumnWidth(2, 175)
+        self.tabla_carrito.setColumnWidth(3, 110)
+        self.tabla_carrito.setColumnWidth(4, 120)
+        self.tabla_carrito.setColumnWidth(5, 60)
+
         self.tabla_carrito.setStyleSheet("""
             QTableWidget { 
                 background-color: #FFFFFF; 
+                alternate-background-color: #F8F8FC;
                 border: 1px solid #E0E0E0; 
-                border-radius: 8px; 
-                font-size: 14px; 
-                color: #1E1E24;
-                gridline-color: #F0F0F5;
+                border-radius: 10px;
+                font-size: 13px; 
+                color: #1E1E24; 
+                gridline-color: #EEEEEE;
             }
             QHeaderView::section { 
-                background-color: #F4F4F9; 
-                padding: 10px; 
+                background-color: #2D2D3A; 
+                color: #FFFFFF;
+                padding: 12px 8px; 
                 border: none; 
-                border-bottom: 2px solid #E0E0E0; 
                 font-weight: bold; 
-                color: #2D2D3A; 
+                font-size: 13px;
             }
-            QTableWidget::item { padding: 6px; }
-            QTableWidget::item:selected { background-color: #BFA2DB; color: #1E1E24; font-weight: bold; }
-        """)
-
-        left_layout.addWidget(self.tabla_carrito)
-
-        # --- PANEL DERECHO (Resumen de Cobro Directo) ---
-        right_frame = QFrame()
-        right_frame.setFixedWidth(340)
-        right_frame.setStyleSheet("""
-            QFrame { background-color: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 12px; } 
-            QLabel { border: none; }
-        """)
-        
-        right_layout = QVBoxLayout(right_frame)
-        right_layout.setContentsMargins(20, 20, 20, 20)
-        right_layout.setSpacing(10)
-
-        titulo_resumen = QLabel("Módulo de Cobro Directo")
-        titulo_resumen.setStyleSheet("font-size: 18px; font-weight: bold; color: #1E1E24;")
-        titulo_resumen.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.lbl_cant_items = QLabel("Productos en carrito: 0")
-        self.lbl_cant_items.setStyleSheet("font-size: 13px; color: #555566;")
-
-        # Total Destacado
-        self.lbl_total = QLabel("$0")
-        self.lbl_total.setStyleSheet("""
-            font-size: 30px; 
-            font-weight: bold; 
-            color: #9370DB; 
-            background-color: #F8F8FC; 
-            border: 1px solid #D1D1E0;
-            border-radius: 8px;
-            padding: 10px;
-        """)
-        self.lbl_total.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        # Selector Medio de Pago
-        lbl_medio = QLabel("Medio de Pago:")
-        lbl_medio.setStyleSheet("font-size: 13px; font-weight: bold; color: #2D2D3A;")
-
-        self.cmb_medio_pago = QComboBox()
-        self.cmb_medio_pago.addItems(["Efectivo", "Débito", "Crédito", "Transferencia"])
-        self.cmb_medio_pago.setStyleSheet("""
-            QComboBox { 
-                padding: 8px; 
-                border: 1px solid #D1D1E0; 
-                border-radius: 6px; 
-                background-color: #F8F8FC; 
+            QTableWidget::item { padding: 4px 8px; }
+            QTableWidget::item:selected { 
+                background-color: #BFA2DB; 
                 color: #1E1E24; 
-                font-size: 13px; 
-            }
-            QComboBox QAbstractItemView { background-color: #FFFFFF; color: #1E1E24; selection-background-color: #BFA2DB; }
-        """)
-        self.cmb_medio_pago.currentTextChanged.connect(self.evaluar_cambio_medio_pago)
-
-        # Campo Efectivo Entregado / Vuelto
-        self.lbl_paga_con = QLabel("Monto Recibido ($):")
-        self.lbl_paga_con.setStyleSheet("font-size: 13px; font-weight: bold; color: #2D2D3A;")
-
-        self.input_paga_con = QLineEdit()
-        self.input_paga_con.setPlaceholderText("Ej: 10000")
-        self.input_paga_con.setStyleSheet("""
-            QLineEdit { 
-                padding: 8px; 
-                border: 1px solid #D1D1E0; 
-                border-radius: 6px; 
-                background-color: #F8F8FC; 
-                color: #1E1E24; 
-                font-size: 14px; 
                 font-weight: bold;
             }
         """)
-        self.input_paga_con.textChanged.connect(self.calcular_vuelto)
+        col_izq.addWidget(self.tabla_carrito)
 
-        self.lbl_vuelto = QLabel("Vuelto: $0")
-        self.lbl_vuelto.setStyleSheet("font-size: 15px; font-weight: bold; color: #2E7D32; background-color: #E8F5E9; padding: 8px; border-radius: 6px;")
+        # 3. Barra Inferior
+        bar_inf = QHBoxLayout()
+        self.lbl_items_totales = QLabel("Ítems en carrito: 0 unidades")
+        self.lbl_items_totales.setStyleSheet("color: #8E8E9F; font-size: 13px; font-weight: bold;")
+        
+        self.btn_limpiar = QPushButton("🗑️ Cancelar Venta (F4)")
+        self.btn_limpiar.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_limpiar.setStyleSheet("""
+            QPushButton {
+                background-color: #3A3A4A; color: #E0E0E0; border: none;
+                padding: 8px 16px; border-radius: 6px; font-size: 12px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #D32F2F; color: #FFFFFF; }
+        """)
+        self.btn_limpiar.clicked.connect(self.limpiar_venta)
 
-        # Botón Cobrar Venta
-        self.btn_confirmar = QPushButton("💳 Procesar Venta (F2)")
-        self.btn_confirmar.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_confirmar.setStyleSheet("""
-            QPushButton { 
-                background-color: #BFA2DB; 
-                color: #1E1E24; 
-                border: none; 
-                padding: 14px; 
-                border-radius: 8px; 
-                font-size: 16px; 
-                font-weight: bold; 
+        bar_inf.addWidget(self.lbl_items_totales)
+        bar_inf.addStretch()
+        bar_inf.addWidget(self.btn_limpiar)
+        col_izq.addLayout(bar_inf)
+
+        layout.addLayout(col_izq, 3)
+
+        # ====================================================
+        # COLUMNA DERECHA: PANEL DE COBRO
+        # ====================================================
+        panel_cobro = QFrame()
+        panel_cobro.setMaximumWidth(390)
+        panel_cobro.setMinimumWidth(350)
+        panel_cobro.setStyleSheet("""
+            QFrame {
+                background-color: #FFFFFF;
+                border-radius: 12px;
+                border: 1px solid #E0E0E0;
+            }
+        """)
+        cobro_layout = QVBoxLayout(panel_cobro)
+        cobro_layout.setContentsMargins(18, 18, 18, 18)
+        cobro_layout.setSpacing(10)
+
+        lbl_tit_cobro = QLabel("Módulo de Cobro")
+        lbl_tit_cobro.setStyleSheet("color: #1E1E24; font-size: 18px; font-weight: bold; border: none;")
+        lbl_tit_cobro.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cobro_layout.addWidget(lbl_tit_cobro)
+
+        # Display Total a Pagar
+        box_total = QFrame()
+        box_total.setStyleSheet("""
+            QFrame {
+                background-color: #F8F8FC;
+                border: 2px solid #BFA2DB;
+                border-radius: 10px;
+                padding: 6px;
+            }
+        """)
+        bt_layout = QVBoxLayout(box_total)
+        lbl_sub_tot = QLabel("TOTAL A PAGAR")
+        lbl_sub_tot.setStyleSheet("color: #8E8E9F; font-size: 11px; font-weight: bold; border: none;")
+        lbl_sub_tot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.lbl_total_grande = QLabel("$0")
+        self.lbl_total_grande.setStyleSheet("color: #6A1B9A; font-size: 32px; font-weight: 900; border: none;")
+        self.lbl_total_grande.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        bt_layout.addWidget(lbl_sub_tot)
+        bt_layout.addWidget(self.lbl_total_grande)
+        cobro_layout.addWidget(box_total)
+
+        # Medios de Pago
+        lbl_mp = QLabel("Medio de Pago:")
+        lbl_mp.setStyleSheet("color: #2D2D3A; font-size: 12px; font-weight: bold; border: none;")
+        cobro_layout.addWidget(lbl_mp)
+
+        grid_mp = QGridLayout()
+        grid_mp.setSpacing(6)
+
+        self.btn_efectivo = QPushButton("💵 Efectivo")
+        self.btn_debito = QPushButton("💳 Débito")
+        self.btn_credito = QPushButton("💳 Crédito")
+        self.btn_transfer = QPushButton("📱 Transf.")
+
+        self.botones_pago = [self.btn_efectivo, self.btn_debito, self.btn_credito, self.btn_transfer]
+
+        for idx, btn in enumerate(self.botones_pago):
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            f, c = divmod(idx, 2)
+            grid_mp.addWidget(btn, f, c)
+
+        self.btn_efectivo.clicked.connect(lambda: self.seleccionar_medio_pago("Efectivo", self.btn_efectivo))
+        self.btn_debito.clicked.connect(lambda: self.seleccionar_medio_pago("Débito", self.btn_debito))
+        self.btn_credito.clicked.connect(lambda: self.seleccionar_medio_pago("Crédito", self.btn_credito))
+        self.btn_transfer.clicked.connect(lambda: self.seleccionar_medio_pago("Transferencia", self.btn_transfer))
+
+        cobro_layout.addLayout(grid_mp)
+
+        # Monto Recibido y Botones de Billetes
+        self.box_efectivo_container = QWidget()
+        self.box_efectivo_container.setStyleSheet("border: none;")
+        layout_box_efectivo = QVBoxLayout(self.box_efectivo_container)
+        layout_box_efectivo.setContentsMargins(0, 2, 0, 0)
+        layout_box_efectivo.setSpacing(6)
+
+        lbl_recibido = QLabel("Monto Recibido ($):")
+        lbl_recibido.setStyleSheet("color: #2D2D3A; font-size: 12px; font-weight: bold;")
+        
+        self.inp_recibido = QLineEdit()
+        self.inp_recibido.setPlaceholderText("Ej: 10000")
+        self.inp_recibido.setStyleSheet("""
+            QLineEdit {
+                background-color: #F8F8FC;
+                color: #1E1E24;
+                border: 1px solid #D1D1E0;
+                border-radius: 6px;
+                padding: 8px;
+                font-size: 15px;
+                font-weight: bold;
+            }
+            QLineEdit:focus { border: 2px solid #BFA2DB; background-color: #FFFFFF; }
+        """)
+        self.inp_recibido.textChanged.connect(self.calcular_vuelto)
+        self.inp_recibido.returnPressed.connect(self.procesar_venta)
+
+        grid_billetes = QGridLayout()
+        grid_billetes.setSpacing(4)
+        billetes = [("Exacto", 0), ("$1.000", 1000), ("$2.000", 2000), ("$5.000", 5000), ("$10.000", 10000), ("$20.000", 20000)]
+        
+        for idx, (txt, val) in enumerate(billetes):
+            b_btn = QPushButton(txt)
+            b_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            b_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #EFEFF5; color: #2D2D3A; border: 1px solid #D1D1E0;
+                    padding: 5px; border-radius: 4px; font-weight: bold; font-size: 11px;
+                }
+                QPushButton:hover { background-color: #BFA2DB; color: #1E1E24; }
+            """)
+            b_btn.clicked.connect(lambda _, v=val: self.asignar_monto_rapido(v))
+            f, c = divmod(idx, 3)
+            grid_billetes.addWidget(b_btn, f, c)
+
+        layout_box_efectivo.addWidget(lbl_recibido)
+        layout_box_efectivo.addWidget(self.inp_recibido)
+        layout_box_efectivo.addLayout(grid_billetes)
+        cobro_layout.addWidget(self.box_efectivo_container)
+
+        # Display Vuelto
+        self.box_vuelto = QFrame()
+        self.box_vuelto.setStyleSheet("""
+            QFrame {
+                background-color: #E8F5E9;
+                border-radius: 8px;
+                padding: 8px 12px;
+                border: 1px solid #C8E6C9;
+            }
+        """)
+        v_layout = QVBoxLayout(self.box_vuelto)
+        v_layout.setContentsMargins(4, 4, 4, 4)
+        v_layout.setSpacing(2)
+
+        self.lbl_v_txt = QLabel("Vuelto al Cliente:")
+        self.lbl_v_txt.setStyleSheet("color: #2E7D32; font-size: 12px; font-weight: bold; border: none;")
+        
+        self.lbl_vuelto_monto = QLabel("$0")
+        self.lbl_vuelto_monto.setStyleSheet("color: #2E7D32; font-size: 20px; font-weight: 900; border: none;")
+        self.lbl_vuelto_monto.setWordWrap(True)
+
+        v_layout.addWidget(self.lbl_v_txt)
+        v_layout.addWidget(self.lbl_vuelto_monto)
+        cobro_layout.addWidget(self.box_vuelto)
+
+        cobro_layout.addStretch()
+
+        # Botón Principal de Cobro (F2)
+        self.btn_procesar = QPushButton("💳 Procesar Venta (F2)")
+        self.btn_procesar.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_procesar.setStyleSheet("""
+            QPushButton {
+                background-color: #BFA2DB;
+                color: #1E1E24;
+                border: none;
+                padding: 14px;
+                border-radius: 8px;
+                font-size: 15px;
+                font-weight: 900;
             }
             QPushButton:hover { background-color: #A888CB; }
             QPushButton:pressed { background-color: #9370DB; color: white; }
         """)
-        self.btn_confirmar.clicked.connect(self.procesar_venta_directa)
+        self.btn_procesar.clicked.connect(self.procesar_venta)
+        cobro_layout.addWidget(self.btn_procesar)
 
-        right_layout.addWidget(titulo_resumen)
-        right_layout.addWidget(self.lbl_cant_items)
-        right_layout.addWidget(self.lbl_total)
-        right_layout.addSpacing(5)
-        right_layout.addWidget(lbl_medio)
-        right_layout.addWidget(self.cmb_medio_pago)
-        right_layout.addWidget(self.lbl_paga_con)
-        right_layout.addWidget(self.input_paga_con)
-        right_layout.addWidget(self.lbl_vuelto)
-        right_layout.addStretch()
-        right_layout.addWidget(self.btn_confirmar)
+        layout.addWidget(panel_cobro, 1)
 
-        layout.addLayout(left_layout)
-        layout.addWidget(right_frame)
+        self.seleccionar_medio_pago("Efectivo", self.btn_efectivo)
 
-        self.shortcut_confirmar = QShortcut(QKeySequence("F2"), self)
-        self.shortcut_confirmar.activated.connect(self.procesar_venta_directa)
+        # Atajos Globales
+        QShortcut(QKeySequence("F2"), self, self.procesar_venta)
+        QShortcut(QKeySequence("F4"), self, self.limpiar_venta)
 
-    def procesar_busqueda(self):
-        criterio = self.search_input.text().strip()
-        if not criterio:
-            return 
-            
-        exito, resultado = buscar_producto_para_venta(criterio)
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.search_input.setFocus()
+
+    def seleccionar_medio_pago(self, medio, boton_activo):
+        self.medio_pago_seleccionado = medio
         
-        if exito:
-            self.agregar_al_carrito(resultado)
-            self.search_input.clear() 
+        estilo_inactivo = """
+            QPushButton {
+                background-color: #F8F8FC; color: #2D2D3A; border: 1px solid #D1D1E0;
+                padding: 8px; border-radius: 6px; font-size: 11px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #EFEFF5; }
+        """
+        estilo_activo = """
+            QPushButton {
+                background-color: #BFA2DB; color: #1E1E24; border: 2px solid #9370DB;
+                padding: 8px; border-radius: 6px; font-size: 11px; font-weight: bold;
+            }
+        """
+
+        for b in self.botones_pago:
+            b.setStyleSheet(estilo_activo if b == boton_activo else estilo_inactivo)
+
+        if medio != "Efectivo":
+            self.box_efectivo_container.setVisible(False)
+            self.box_vuelto.setVisible(False)
         else:
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Atención")
-            msg.setText(resultado)
-            msg.setIcon(QMessageBox.Icon.Warning)
-            msg.setStyleSheet("QMessageBox { background-color: #FFFFFF; } QLabel { color: #1E1E24; font-weight: bold; }")
-            msg.exec()
+            self.box_efectivo_container.setVisible(True)
+            self.box_vuelto.setVisible(True)
+            self.calcular_vuelto()
+
+    def procesar_escaneo_o_busqueda(self):
+        texto = self.search_input.text().strip()
+        if not texto:
+            return
+
+        exito, producto = buscar_producto_para_venta(texto)
+        if exito:
+            self.agregar_producto_al_carrito(producto)
+            self.search_input.clear()
+        else:
+            QMessageBox.warning(self, "No Encontrado", producto)
             self.search_input.selectAll()
 
-    def agregar_al_carrito(self, producto):
-        unidad = producto.get('unidad_medida', 'UN')
-        stock_disp = float(producto.get('stock_actual', 0.0))
-        
-        if stock_disp <= 0:
-            QMessageBox.warning(self, "Stock Agotado", f"El producto '{producto['nombre_producto']}' no tiene stock disponible.")
-            return
+        self.search_input.setFocus()
 
-        cant_en_carrito = sum(item['cantidad'] for item in self.carrito if item['id_producto'] == producto['id_producto'])
-        stock_remanente = stock_disp - cant_en_carrito
+    def agregar_producto_al_carrito(self, producto):
+        id_prod = producto["id_producto"]
+        sku = producto["sku"]
+        nombre = producto["nombre_producto"]
+        precio_base = float(producto["precio_venta_base"])
+        valor_final = float(producto["valor_final"])
+        unidad = (producto["unidad_medida"] or "UN").upper()
 
-        if stock_remanente <= 0:
-            QMessageBox.warning(self, "Límite de Stock", f"Ya agregaste todo el stock disponible ({stock_disp} {unidad}) al carrito.")
-            return
-
-        cantidad = 1.0
-
-        if unidad in ['KG', 'GR', 'LT']:
-            precio_formateado = f"${producto['valor_final']:,.0f}".replace(',', '.')
-            peso, ok = QInputDialog.getDouble(
-                self, 
-                "Ingreso de Peso / Cantidad", 
-                f"Producto: '{producto['nombre_producto']}' ({precio_formateado} / {unidad})\n"
-                f"Stock disponible: {stock_remanente:.3f} {unidad}\n\n"
-                f"Ingrese el peso a vender ({unidad}):", 
-                value=min(1.000, stock_remanente), 
-                minValue=0.001, 
-                maxValue=stock_remanente,
-                decimals=3
-            )
-            if not ok or peso <= 0:
-                return
-            cantidad = peso
-        else:
-            if (cant_en_carrito + 1.0) > stock_disp:
-                QMessageBox.warning(self, "Stock Insuficiente", f"No puedes agregar más unidades de '{producto['nombre_producto']}'.")
-                return
-
-        encontrado = False
-        for item in self.carrito:
-            if item['id_producto'] == producto['id_producto'] and unidad == 'UN':
-                item['cantidad'] += cantidad
-                item['subtotal'] = item['cantidad'] * item['valor_final']
-                encontrado = True
-                break
+        # Si el producto es por PESO (KG, GR, LT), abrir diálogo de báscula express
+        if unidad in ["KG", "LT", "GR"]:
+            dialogo = DialogoPeso(nombre, valor_final, unidad, self)
+            if dialogo.exec() == QDialog.DialogCode.Accepted:
+                peso = dialogo.peso_ingresado
+                for item in self.carrito:
+                    if item["id_producto"] == id_prod:
+                        item["cantidad"] += peso
+                        self.renderizar_carrito()
+                        return
                 
-        if not encontrado:
-            nuevo_item = {
-                'id_producto': producto['id_producto'],
-                'sku': producto['sku'],
-                'nombre_producto': producto['nombre_producto'],
-                'unidad_medida': unidad,
-                'stock_maximo': stock_disp,
-                'cantidad': cantidad,
-                'precio_base': producto['precio_venta_base'],
-                'valor_final': producto['valor_final'],
-                'subtotal': cantidad * producto['valor_final']
-            }
-            self.carrito.append(nuevo_item)
-            
-        self.refrescar_tabla_y_totales()
+                self.carrito.append({
+                    "id_producto": id_prod,
+                    "sku": sku,
+                    "nombre": nombre,
+                    "precio_base": precio_base,
+                    "valor_final": valor_final,
+                    "cantidad": peso,
+                    "unidad": unidad
+                })
+                self.renderizar_carrito()
+            return
 
-    def cambiar_cantidad(self, indice, delta):
-        if 0 <= indice < len(self.carrito):
-            item = self.carrito[indice]
-            paso = 0.5 if item['unidad_medida'] in ['KG', 'LT'] else 1.0
-            nueva_cant = item['cantidad'] + (delta * paso)
-            
-            if delta > 0 and nueva_cant > item['stock_maximo']:
-                QMessageBox.warning(self, "Límite de Stock", f"No puedes superar el stock registrado en inventario ({item['stock_maximo']} {item['unidad_medida']}).")
+        # Para productos por UNIDAD estándar
+        for item in self.carrito:
+            if item["id_producto"] == id_prod:
+                item["cantidad"] += 1.0
+                self.renderizar_carrito()
                 return
 
-            if nueva_cant <= 0:
-                self.eliminar_del_carrito(indice)
-            else:
-                item['cantidad'] = nueva_cant
-                item['subtotal'] = item['cantidad'] * item['valor_final']
-                self.refrescar_tabla_y_totales()
+        self.carrito.append({
+            "id_producto": id_prod,
+            "sku": sku,
+            "nombre": nombre,
+            "precio_base": precio_base,
+            "valor_final": valor_final,
+            "cantidad": 1.0,
+            "unidad": "UN"
+        })
+        self.renderizar_carrito()
 
-    def eliminar_del_carrito(self, indice):
-        if 0 <= indice < len(self.carrito):
-            del self.carrito[indice]
-            self.refrescar_tabla_y_totales()
-            self.search_input.setFocus()
+    def abrir_edicion_peso(self, fila_idx):
+        item = self.carrito[fila_idx]
+        dialogo = DialogoPeso(item["nombre"], item["valor_final"], item["unidad"], self)
+        dialogo.inp_peso.setText(str(item["cantidad"]))
+        dialogo.inp_peso.selectAll()
+        if dialogo.exec() == QDialog.DialogCode.Accepted:
+            self.carrito[fila_idx]["cantidad"] = dialogo.peso_ingresado
+            self.renderizar_carrito()
 
-    def evaluar_cambio_medio_pago(self, texto_medio):
-        es_efectivo = texto_medio == "Efectivo"
-        self.lbl_paga_con.setVisible(es_efectivo)
-        self.input_paga_con.setVisible(es_efectivo)
-        self.lbl_vuelto.setVisible(es_efectivo)
-        if not es_efectivo:
-            self.input_paga_con.clear()
-
-    def calcular_vuelto(self):
-        total_acumulado = sum(item['subtotal'] for item in self.carrito)
-        paga_str = self.input_paga_con.text().strip()
-        
-        if paga_str.isdigit():
-            paga_val = float(paga_str)
-            vuelto = paga_val - total_acumulado
-            if vuelto >= 0:
-                self.lbl_vuelto.setText(f"Vuelto: ${vuelto:,.0f}".replace(',', '.'))
-                self.lbl_vuelto.setStyleSheet("font-size: 15px; font-weight: bold; color: #2E7D32; background-color: #E8F5E9; padding: 8px; border-radius: 6px;")
-            else:
-                self.lbl_vuelto.setText(f"Falta: ${abs(vuelto):,.0f}".replace(',', '.'))
-                self.lbl_vuelto.setStyleSheet("font-size: 15px; font-weight: bold; color: #C62828; background-color: #FFEBEE; padding: 8px; border-radius: 6px;")
-        else:
-            self.lbl_vuelto.setText("Vuelto: $0")
-
-    def refrescar_tabla_y_totales(self):
+    def renderizar_carrito(self):
         self.tabla_carrito.setRowCount(0)
-        total_acumulado = 0
-        
+        total_acumulado = 0.0
+        total_unidades = 0.0
+
         for fila_idx, item in enumerate(self.carrito):
             self.tabla_carrito.insertRow(fila_idx)
-            
-            unidad = item.get('unidad_medida', 'UN')
-            if unidad in ['KG', 'LT', 'GR']:
-                cant_str = f"{item['cantidad']:.3f}".rstrip('0').rstrip('.') + f" {unidad.lower()}"
-            else:
-                cant_str = f"{int(item['cantidad'])} un"
+            subtotal = item["cantidad"] * item["valor_final"]
+            total_acumulado += subtotal
+            total_unidades += item["cantidad"]
 
-            celdas = [
-                item['sku'],
-                item['nombre_producto'],
-                cant_str,
-                f"${item['valor_final']:,.0f}".replace(',', '.'),
-                f"${item['subtotal']:,.0f}".replace(',', '.')
-            ]
-            
-            for col_idx, valor in enumerate(celdas):
-                celda_ui = QTableWidgetItem(valor)
-                celda_ui.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.tabla_carrito.setItem(fila_idx, col_idx, celda_ui)
-            
-            # Botones de Acción
-            action_widget = QWidget()
-            action_layout = QHBoxLayout(action_widget)
-            action_layout.setContentsMargins(2, 2, 2, 2)
-            action_layout.setSpacing(4)
+            sku_it = QTableWidgetItem(item["sku"])
+            sku_it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            btn_menos = QPushButton("-")
-            btn_mas = QPushButton("+")
-            btn_del = QPushButton("❌")
+            nom_it = QTableWidgetItem(item["nombre"])
+            nom_it.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
-            for btn in [btn_menos, btn_mas, btn_del]:
-                btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn.setStyleSheet("""
-                    QPushButton { 
-                        background-color: #EFEFF5; 
-                        border: none; 
-                        border-radius: 4px; 
-                        font-weight: bold; 
-                        padding: 4px 8px; 
-                    } 
-                    QPushButton:hover { background-color: #BFA2DB; color: #1E1E24; }
+            # Celda interactiva de Cantidad / Peso
+            box_cant = QWidget()
+            layout_cant = QHBoxLayout(box_cant)
+            layout_cant.setContentsMargins(2, 2, 2, 2)
+            layout_cant.setSpacing(4)
+            layout_cant.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            es_pesable = item["unidad"] in ["KG", "LT", "GR"]
+
+            if es_pesable:
+                cant_str = f"⚖️ {item['cantidad']:.3f}".rstrip('0').rstrip('.') + f" {item['unidad'].lower()}"
+                btn_editar_peso = QPushButton(cant_str)
+                btn_editar_peso.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn_editar_peso.setStyleSheet("""
+                    QPushButton {
+                        background-color: #E8F5E9; color: #2E7D32; font-weight: 900;
+                        border: 1px solid #A5D6A7; border-radius: 6px; padding: 4px 10px; font-size: 12px;
+                    }
+                    QPushButton:hover { background-color: #C8E6C9; }
                 """)
+                btn_editar_peso.clicked.connect(lambda _, idx=fila_idx: self.abrir_edicion_peso(idx))
+                layout_cant.addWidget(btn_editar_peso)
+            else:
+                btn_menos = QPushButton("-")
+                btn_mas = QPushButton("+")
+                estilo_btns = """
+                    QPushButton {
+                        background-color: #2D2D3A; color: #FFFFFF; font-weight: bold; 
+                        border-radius: 4px; min-width: 28px; max-width: 28px; min-height: 26px; max-height: 26px; font-size: 14px;
+                    }
+                    QPushButton:hover { background-color: #BFA2DB; color: #1E1E24; }
+                """
+                btn_menos.setStyleSheet(estilo_btns)
+                btn_mas.setStyleSheet(estilo_btns)
 
-            btn_menos.clicked.connect(lambda chk=False, idx=fila_idx: self.cambiar_cantidad(idx, -1))
-            btn_mas.clicked.connect(lambda chk=False, idx=fila_idx: self.cambiar_cantidad(idx, 1))
-            btn_del.clicked.connect(lambda chk=False, idx=fila_idx: self.eliminar_del_carrito(idx))
+                lbl_c = QLabel(str(int(item["cantidad"])))
+                lbl_c.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                lbl_c.setStyleSheet("font-weight: 900; font-size: 13px; color: #1E1E24; min-width: 28px;")
 
-            action_layout.addWidget(btn_menos)
-            action_layout.addWidget(btn_mas)
-            action_layout.addWidget(btn_del)
+                btn_menos.clicked.connect(lambda _, idx=fila_idx: self.modificar_cantidad(idx, -1))
+                btn_mas.clicked.connect(lambda _, idx=fila_idx: self.modificar_cantidad(idx, 1))
 
-            self.tabla_carrito.setCellWidget(fila_idx, 5, action_widget)
-                
-            total_acumulado += item['subtotal']
-            
-        texto_total = f"${total_acumulado:,.0f}".replace(',', '.')
-        self.lbl_cant_items.setText(f"Productos en carrito: {len(self.carrito)}")
-        self.lbl_total.setText(texto_total)
+                layout_cant.addWidget(btn_menos)
+                layout_cant.addWidget(lbl_c)
+                layout_cant.addWidget(btn_mas)
+
+            precio_it = QTableWidgetItem(f"${item['valor_final']:,.0f}".replace(',', '.'))
+            precio_it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+            sub_it = QTableWidgetItem(f"${subtotal:,.0f}".replace(',', '.'))
+            sub_it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+            # Botón Eliminar
+            btn_del = QPushButton("❌")
+            btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_del.setStyleSheet("background: transparent; border: none; font-size: 13px;")
+            btn_del.clicked.connect(lambda _, idx=fila_idx: self.eliminar_item_carrito(idx))
+
+            self.tabla_carrito.setItem(fila_idx, 0, sku_it)
+            self.tabla_carrito.setItem(fila_idx, 1, nom_it)
+            self.tabla_carrito.setCellWidget(fila_idx, 2, box_cant)
+            self.tabla_carrito.setItem(fila_idx, 3, precio_it)
+            self.tabla_carrito.setItem(fila_idx, 4, sub_it)
+            self.tabla_carrito.setCellWidget(fila_idx, 5, btn_del)
+
+        self.lbl_total_grande.setText(f"${total_acumulado:,.0f}".replace(',', '.'))
+        self.lbl_items_totales.setText(f"Ítems en carrito: {total_unidades:.2f}".rstrip('0').rstrip('.') + f" unidades ({len(self.carrito)} productos)")
         self.calcular_vuelto()
 
-    def procesar_venta_directa(self):
-        if not self.carrito:
-            QMessageBox.warning(self, "Carrito Vacío", "No hay productos en la lista para vender.")
+    def modificar_cantidad(self, indice, delta):
+        if 0 <= indice < len(self.carrito):
+            self.carrito[indice]["cantidad"] += delta
+            if self.carrito[indice]["cantidad"] <= 0:
+                self.carrito.pop(indice)
+            self.renderizar_carrito()
+
+    def eliminar_item_carrito(self, indice):
+        if 0 <= indice < len(self.carrito):
+            self.carrito.pop(indice)
+            self.renderizar_carrito()
+
+    def asignar_monto_rapido(self, monto):
+        total = self.obtener_total_actual()
+        if monto == 0:
+            self.inp_recibido.setText(str(int(total)))
+        else:
+            self.inp_recibido.setText(str(monto))
+        self.calcular_vuelto()
+
+    def obtener_total_actual(self):
+        return sum(item["cantidad"] * item["valor_final"] for item in self.carrito)
+
+    def calcular_vuelto(self):
+        if self.medio_pago_seleccionado != "Efectivo":
             return
 
-        medio = self.cmb_medio_pago.currentText()
-        total_acumulado = sum(item['subtotal'] for item in self.carrito)
+        total = self.obtener_total_actual()
+        txt = self.inp_recibido.text().strip().replace('.', '')
 
-        # Validación de vuelto en efectivo
-        if medio == "Efectivo":
-            paga_str = self.input_paga_con.text().strip()
-            if paga_str.isdigit():
-                if float(paga_str) < total_acumulado:
-                    QMessageBox.warning(self, "Monto Insuficiente", "El dinero recibido es menor que el total de la venta.")
-                    return
-            elif total_acumulado > 0:
-                QMessageBox.warning(self, "Monto Requerido", "Ingrese el monto recibido en efectivo para calcular el vuelto.")
+        try:
+            recibido = float(txt) if txt else 0.0
+            vuelto = recibido - total
+            if vuelto >= 0:
+                self.box_vuelto.setStyleSheet("background-color: #E8F5E9; border-radius: 8px; padding: 8px; border: 1px solid #C8E6C9;")
+                self.lbl_v_txt.setText("Vuelto al Cliente:")
+                self.lbl_v_txt.setStyleSheet("color: #2E7D32; font-size: 12px; font-weight: bold; border: none;")
+                self.lbl_vuelto_monto.setText(f"${vuelto:,.0f}".replace(',', '.'))
+                self.lbl_vuelto_monto.setStyleSheet("color: #2E7D32; font-size: 22px; font-weight: 900; border: none;")
+            else:
+                falta = abs(vuelto)
+                self.box_vuelto.setStyleSheet("background-color: #FFEBEE; border-radius: 8px; padding: 8px; border: 1px solid #FFCDD2;")
+                self.lbl_v_txt.setText("Monto Insuficiente:")
+                self.lbl_v_txt.setStyleSheet("color: #C62828; font-size: 12px; font-weight: bold; border: none;")
+                self.lbl_vuelto_monto.setText(f"Faltan ${falta:,.0f}".replace(',', '.'))
+                self.lbl_vuelto_monto.setStyleSheet("color: #C62828; font-size: 20px; font-weight: 900; border: none;")
+        except ValueError:
+            self.lbl_vuelto_monto.setText("$0")
+
+    def limpiar_venta(self):
+        if self.carrito:
+            self.carrito.clear()
+            self.inp_recibido.clear()
+            self.renderizar_carrito()
+        self.search_input.clear()
+        self.search_input.setFocus()
+
+    def procesar_venta(self):
+        if not self.carrito:
+            QMessageBox.warning(self, "Carrito Vacío", "No hay productos en el carrito para procesar.")
+            return
+
+        total = self.obtener_total_actual()
+        
+        if self.medio_pago_seleccionado == "Efectivo":
+            txt = self.inp_recibido.text().strip().replace('.', '')
+            recibido = float(txt) if txt else 0.0
+            if recibido < total:
+                QMessageBox.warning(self, "Monto Insuficiente", "El monto recibido es menor al total a pagar.")
+                self.inp_recibido.setFocus()
                 return
 
-        exito, resultado = registrar_venta_directa(self.carrito, medio)
-        
+        # Mapear exactamente lo que pide registrar_venta_directa
+        payload_carrito = []
+        for it in self.carrito:
+            payload_carrito.append({
+                "id_producto": it["id_producto"],
+                "cantidad": it["cantidad"],
+                "precio_base": it["precio_base"],
+                "valor_final": it["valor_final"],
+                "subtotal": it["cantidad"] * it["valor_final"]
+            })
+
+        exito, resultado = registrar_venta_directa(payload_carrito, self.medio_pago_seleccionado)
+
         if exito:
-            id_generado = resultado
-            mensaje = f"✅ Venta V-{id_generado} procesada e ingresada a Caja con éxito."
-            if medio == "Efectivo" and self.input_paga_con.text().strip().isdigit():
-                vuelto_val = float(self.input_paga_con.text()) - total_acumulado
-                mensaje += f"\n\n💵 Entregar Vuelto: ${vuelto_val:,.0f}".replace(',', '.')
-            
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Venta Completada")
-            msg.setText(mensaje)
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setStyleSheet("""
-                QMessageBox { background-color: #FFFFFF; } 
-                QLabel { color: #1E1E24; font-weight: bold; font-size: 14px; }
-                QPushButton { background-color: #BFA2DB; color: #1E1E24; border: none; padding: 8px 20px; border-radius: 6px; font-weight: bold; }
-            """)
-            msg.exec()
-            
-            self.carrito.clear()
-            self.input_paga_con.clear()
-            self.refrescar_tabla_y_totales()
-            self.search_input.setFocus()
+            QMessageBox.information(
+                self, 
+                "Venta Exitosa", 
+                f"Venta #{resultado} procesada correctamente.\nTotal: ${total:,.0f} ({self.medio_pago_seleccionado})"
+            )
+            self.limpiar_venta()
         else:
-            QMessageBox.critical(self, "Error de Venta", str(resultado))
+            QMessageBox.critical(self, "Error al Cobrar", resultado)

@@ -3,9 +3,7 @@ from datetime import datetime, date
 from database.connection import get_connection
 
 def buscar_producto_para_venta(criterio):
-    """
-    Busca un producto por código QR, SKU o nombre para agregarlo al carrito.
-    """
+    """Busca un producto por código QR, SKU o nombre para agregarlo al carrito."""
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -41,14 +39,12 @@ def buscar_producto_para_venta(criterio):
     except Exception as e:
         return False, f"Error al buscar producto: {str(e)}"
     finally:
-        if 'conn' in locals():
+        if 'conn' in locals() and conn:
             conn.close()
 
 
 def registrar_venta_directa(carrito, medio_pago, id_terminal=1):
-    """
-    Registra la venta, descuenta stock e inserta el cobro en la tabla 'caja' en 1 sola transacción.
-    """
+    """Registra la venta, descuenta stock e inserta el cobro en la tabla 'caja'."""
     if not carrito:
         return False, "El carrito está vacío."
         
@@ -71,7 +67,7 @@ def registrar_venta_directa(carrito, medio_pago, id_terminal=1):
         cursor.execute(query_venta, (id_terminal, fecha_actual, hora_actual, total_valor_final, total_monto))
         id_venta = cursor.lastrowid
 
-        # Queries para items y actualización de stock
+        # 2. Registrar Ítems y Descontar Stock
         query_item = """
             INSERT INTO venta_items (
                 id_venta, id_producto, cantidad, precio_base, valor_final, subtotal
@@ -83,7 +79,6 @@ def registrar_venta_directa(carrito, medio_pago, id_terminal=1):
             WHERE id_producto = ?
         """
 
-        # 2. Registrar Ítems y Descontar Inventario
         for item in carrito:
             cant = float(item['cantidad'])
             prod_id = int(item['id_producto'])
@@ -98,7 +93,7 @@ def registrar_venta_directa(carrito, medio_pago, id_terminal=1):
             ))
             cursor.execute(query_stock, (cant, prod_id))
 
-        # 3. Registrar Cobro Inmediato en Tabla 'caja'
+        # 3. Registrar Cobro en Tabla 'caja'
         query_caja = """
             INSERT INTO caja (
                 id_venta, total_monto, descuento_final, total_pagar, 
@@ -111,9 +106,9 @@ def registrar_venta_directa(carrito, medio_pago, id_terminal=1):
         return True, id_venta
 
     except Exception as e:
-        if 'conn' in locals():
+        if 'conn' in locals() and conn:
             conn.rollback()
         return False, f"Error al procesar la venta directa: {str(e)}"
     finally:
-        if 'conn' in locals():
+        if 'conn' in locals() and conn:
             conn.close()
