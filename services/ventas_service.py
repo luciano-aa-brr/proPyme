@@ -2,32 +2,59 @@ import sqlite3
 from datetime import date, datetime
 from database.connection import get_connection
 
-def _obtener_columnas_tabla(cursor, nombre_tabla):
-    """Devuelve un diccionario {nombre_columna: info} de la tabla indicada."""
+def _obtener_columnas_info(cursor, nombre_tabla):
+    """Retorna información detallada de las columnas de una tabla."""
     cursor.execute(f"PRAGMA table_info({nombre_tabla})")
-    return {row[1]: row for row in cursor.fetchall()}
+    return {
+        row[1]: {
+            'type': str(row[2]).upper(),
+            'notnull': bool(row[3]),
+            'default': row[4],
+            'pk': bool(row[5])
+        }
+        for row in cursor.fetchall()
+    }
 
-def _insertar_dinamico(cursor, nombre_tabla, datos_posibles):
+def _insertar_inteligente(cursor, nombre_tabla, mapeo_valores):
     """
-    Inserta únicamente las columnas que realmente existen en la tabla física de SQLite,
-    garantizando compatibilidad con cualquier versión del esquema.
+    Inserta datos en la tabla rellenando dinámicamente cualquier columna NOT NULL 
+    sin valor por defecto para evitar excepciones por constraints.
     """
-    cols_existentes = _obtener_columnas_tabla(cursor, nombre_tabla)
-    datos_filtrados = {k: v for k, v in datos_posibles.items() if k in cols_existentes}
+    cols_info = _obtener_columnas_info(cursor, nombre_tabla)
+    payload = {}
 
-    columnas_sql = ", ".join(datos_filtrados.keys())
-    placeholders = ", ".join(["?"] * len(datos_filtrados))
-    valores = tuple(datos_filtrados.values())
+    fecha_hoy = date.today().strftime('%Y-%m-%d')
+    hora_hoy = datetime.now().strftime('%H:%M:%S')
 
-    cursor.execute(
-        f"INSERT INTO {nombre_tabla} ({columnas_sql}) VALUES ({placeholders})",
-        valores
-    )
+    for col_nombre, info in cols_info.items():
+        if info['pk']:
+            continue
+
+        if col_nombre in mapeo_valores:
+            payload[col_nombre] = mapeo_valores[col_nombre]
+        elif info['notnull'] and info['default'] is None:
+            tipo = info['type']
+            if "INT" in tipo:
+                payload[col_nombre] = 1 if ("terminal" in col_nombre or "id" in col_nombre) else 0
+            elif any(t in tipo for t in ["REAL", "FLOA", "NUM", "DOUB"]):
+                payload[col_nombre] = 0.0
+            elif "DATE" in tipo or "fecha" in col_nombre:
+                payload[col_nombre] = fecha_hoy
+            elif "TIME" in tipo or "hora" in col_nombre:
+                payload[col_nombre] = hora_hoy
+            else:
+                payload[col_nombre] = "Cerrada" if "estado" in col_nombre else "N/A"
+
+    cols_sql = ", ".join(payload.keys())
+    placeholders = ", ".join(["?"] * len(payload))
+    valores = tuple(payload.values())
+
+    cursor.execute(f"INSERT INTO {nombre_tabla} ({cols_sql}) VALUES ({placeholders})", valores)
     return cursor.lastrowid
 
 def buscar_producto_para_venta(termino):
     """
-    Busca un producto por código QR, código de barra, SKU o nombre.
+    Busca un producto por código QR, SKU o coincidencia de nombre.
     """
     try:
         conn = get_connection()
@@ -35,60 +62,39 @@ def buscar_producto_para_venta(termino):
         cursor = conn.cursor()
 
         termino_limpio = str(termino).strip()
-        cols_prod = _obtener_columnas_tabla(cursor, "productos")
+        cursor.execute("PRAGMA table_info(productos)")
+        columnas = [col[1] for col in cursor.fetchall()]
 
-        # Filtro de estado activo
-        filtro_estado = "1=1"
-        if "estado_producto" in cols_prod:
-            filtro_estado = "estado_producto = 'Activo'"
-        elif "es_activo" in cols_prod:
-            filtro_estado = "es_activo = 1"
+        # 1. Filtro de estado
+        filtro_estado = "estado_producto = 'Activo'" if "estado_producto" in columnas else "1=1"
 
-        # Columnas de identificación directa
+        # 2. Búsqueda exacta
         filtros_id = []
         params_id = []
 
-        if "codigo_qr" in cols_prod:
+        if "codigo_qr" in columnas:
             filtros_id.append("codigo_qr = ?")
             params_id.append(termino_limpio)
-        if "codigo_barra" in cols_prod:
-            filtros_id.append("codigo_barra = ?")
-            params_id.append(termino_limpio)
-        if "codigo_barras" in cols_prod:
-            filtros_id.append("codigo_barras = ?")
-            params_id.append(termino_limpio)
-        if "sku" in cols_prod:
+        if "sku" in columnas:
             filtros_id.append("sku = ?")
             params_id.append(termino_limpio)
 
         prod = None
-
-        # 1. Búsqueda exacta
         if filtros_id:
-            query_exacta = f"""
-                SELECT * FROM productos
-                WHERE {filtro_estado} AND ({' OR '.join(filtros_id)})
-                LIMIT 1
-            """
+            query_exacta = f"SELECT * FROM productos WHERE {filtro_estado} AND ({' OR '.join(filtros_id)}) LIMIT 1"
             cursor.execute(query_exacta, params_id)
             prod = cursor.fetchone()
 
-        # 2. Búsqueda parcial por nombre
-        if not prod and "nombre_producto" in cols_prod:
-            query_nombre = f"""
-                SELECT * FROM productos
-                WHERE {filtro_estado} AND nombre_producto LIKE ?
-                ORDER BY nombre_producto ASC
-                LIMIT 1
-            """
+        # 3. Búsqueda por nombre
+        if not prod and "nombre_producto" in columnas:
+            query_nombre = f"SELECT * FROM productos WHERE {filtro_estado} AND nombre_producto LIKE ? ORDER BY nombre_producto ASC LIMIT 1"
             cursor.execute(query_nombre, (f"%{termino_limpio}%",))
             prod = cursor.fetchone()
 
         if prod:
             p_dict = dict(prod)
-
-            precio_final = float(p_dict.get("valor_final") or p_dict.get("precio_venta") or p_dict.get("precio_venta_base") or 0.0)
-            precio_base = float(p_dict.get("precio_venta_base") or p_dict.get("precio_costo") or precio_final)
+            precio_final = float(p_dict.get("valor_final") or p_dict.get("precio_venta_base") or 0.0)
+            precio_base = float(p_dict.get("precio_venta_base") or precio_final)
 
             p_dict["id_producto"] = p_dict["id_producto"]
             p_dict["sku"] = str(p_dict.get("sku") or "S/SKU")
@@ -111,7 +117,7 @@ def buscar_producto_para_venta(termino):
 
 def registrar_venta_directa(items_carrito, medio_pago, usuario="Cajero"):
     """
-    Registra la venta de forma atómica y mapea dinámicamente todos los campos requeridos por la base de datos.
+    Registra la venta satisfaciendo todos los constraints de la base de datos de proPyme.
     """
     if not items_carrito:
         return False, "El carrito de compras está vacío."
@@ -121,7 +127,7 @@ def registrar_venta_directa(items_carrito, medio_pago, usuario="Cajero"):
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        # 1. Validar existencias disponibles
+        # 1. Validar existencias
         for item in items_carrito:
             cursor.execute("SELECT nombre_producto, stock_actual FROM productos WHERE id_producto = ?", (item["id_producto"],))
             prod = cursor.fetchone()
@@ -143,18 +149,27 @@ def registrar_venta_directa(items_carrito, medio_pago, usuario="Cajero"):
         # 2. Insertar en tabla ventas
         datos_venta = {
             "id_terminal": 1,
+            "id_usuario_apertura": 1,
+            "id_usuario_cierre": 1,
+            "fecha_apertura": fecha_actual,
+            "hora_apertura": hora_actual,
+            "fecha_cierre": fecha_actual,
+            "hora_cierre": hora_actual,
             "fecha": fecha_actual,
             "hora": hora_actual,
             "total_monto": total_monto,
+            "monto_venta": total_monto,
+            "monto_total": total_monto,
             "total": total_monto,
             "turno": usuario,
             "cajero": usuario,
             "usuario": usuario,
+            "estado_venta": "Cerrada",
             "medio_pago": medio_pago
         }
-        id_venta = _insertar_dinamico(cursor, "ventas", datos_venta)
+        id_venta = _insertar_inteligente(cursor, "ventas", datos_venta)
 
-        # 3. Insertar detalle de venta y descontar stock
+        # 3. Insertar detalle de venta y descontar existencias
         for it in items_carrito:
             p_base = float(it.get("precio_base") or it.get("valor_final") or 0.0)
             p_final = float(it.get("valor_final") or p_base)
@@ -165,11 +180,11 @@ def registrar_venta_directa(items_carrito, medio_pago, usuario="Cajero"):
                 "id_producto": it["id_producto"],
                 "cantidad": float(it["cantidad"]),
                 "precio_base": p_base,
-                "precio_unitario": p_final,
+                "descuento_aplicado": 0.0,
                 "valor_final": p_final,
                 "subtotal": subtotal
             }
-            _insertar_dinamico(cursor, "venta_items", datos_item)
+            _insertar_inteligente(cursor, "venta_items", datos_item)
 
             cursor.execute("""
                 UPDATE productos
@@ -177,23 +192,31 @@ def registrar_venta_directa(items_carrito, medio_pago, usuario="Cajero"):
                 WHERE id_producto = ?
             """, (it["cantidad"], it["id_producto"]))
 
-        # 4. Insertar registro en caja
+        # 4. Insertar en caja
         datos_caja = {
             "id_terminal": 1,
             "id_venta": id_venta,
+            "id_usuario_apertura": 1,
+            "id_usuario_cierre": 1,
+            "fecha_apertura": fecha_actual,
+            "hora_apertura": hora_actual,
+            "fecha_cierre": fecha_actual,
+            "hora_cierre": hora_actual,
             "fecha": fecha_actual,
             "hora": hora_actual,
             "tipo_movimiento": "Venta",
             "medio_pago": medio_pago,
+            "monto_venta": total_monto,
             "total_monto": total_monto,
             "total_pagar": total_monto,
             "monto": total_monto,
             "total": total_monto,
             "usuario": usuario,
             "cajero": usuario,
+            "turno": usuario,
             "descripcion": f"Venta directa #{id_venta}"
         }
-        _insertar_dinamico(cursor, "caja", datos_caja)
+        _insertar_inteligente(cursor, "caja", datos_caja)
 
         conn.commit()
         return True, id_venta
