@@ -1,52 +1,55 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                               QTableWidget, QTableWidgetItem, QHeaderView, 
-                               QLabel, QFrame, QMessageBox, QDateEdit, 
-                               QListWidget, QAbstractItemView, QCalendarWidget)
+                               QLineEdit, QTableWidget, QTableWidgetItem, 
+                               QHeaderView, QLabel, QMessageBox, QDateEdit, 
+                               QAbstractItemView, QFrame)
 from PySide6.QtCore import Qt, QDate
+from PySide6.QtGui import QColor
 
-from services.historial_service import obtener_historial_ventas, obtener_detalle_historial
+# Si tienes un servicio para historial, asegúrate de importarlo aquí
+# from services.ventas_service import obtener_historial_ventas, anular_venta
 
 class HistorialView(QWidget):
     def __init__(self):
         super().__init__()
-        
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(20)
 
-        # --- PANEL IZQUIERDO: Filtros y Tabla de Ventas ---
-        left_layout = QVBoxLayout()
-        left_layout.setSpacing(12)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(16)
 
-        # --- BARRA SUPERIOR DE FILTROS ---
-        filter_layout = QHBoxLayout()
-        filter_layout.setSpacing(12)
+        # --- 1. TARJETAS KPI DE RESUMEN DE VENTAS ---
+        kpi_layout = QHBoxLayout()
+        kpi_layout.setSpacing(16)
 
-        lbl_desde = QLabel("Desde:")
-        lbl_desde.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFFFFF;")
-        
-        self.date_desde = QDateEdit(QDate.currentDate())
-        self.date_desde.setCalendarPopup(True) # Habilita el desplegable del calendario
-        self.date_desde.setDisplayFormat("dd/MM/yyyy")
+        self.card_total_ventas = self.crear_tarjeta_kpi("Transacciones Realizadas", "0", "#BFA2DB")
+        self.card_recaudado = self.crear_tarjeta_kpi("Monto Total Recaudado", "$0", "#81C784")
 
-        lbl_hasta = QLabel("Hasta:")
-        lbl_hasta.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFFFFF;")
-        
-        self.date_hasta = QDateEdit(QDate.currentDate())
-        self.date_hasta.setCalendarPopup(True) # Habilita el desplegable del calendario
-        self.date_hasta.setDisplayFormat("dd/MM/yyyy")
+        kpi_layout.addWidget(self.card_total_ventas)
+        kpi_layout.addWidget(self.card_recaudado)
+        layout.addLayout(kpi_layout)
 
-        # Estilo visual moderno para el QDateEdit y el Popup del Calendario
+        # --- 2. BARRA DE FILTROS TOTALMENTE VISIBLE ---
+        filtro_container = QFrame()
+        filtro_container.setStyleSheet("""
+            QFrame {
+                background-color: #2D2D3A;
+                border-radius: 8px;
+                padding: 6px;
+            }
+        """)
+        filtro_layout = QHBoxLayout(filtro_container)
+        filtro_layout.setContentsMargins(12, 10, 12, 10)
+        filtro_layout.setSpacing(12)
+
+        # Estilo para inputs y fechas
         estilo_fecha = """
             QDateEdit {
-                padding: 8px 12px;
+                background-color: #1E1E24;
+                color: #FFFFFF;
                 border: 1px solid #4A4A5A;
                 border-radius: 6px;
-                background-color: #2D2D3A;
-                color: #FFFFFF;
+                padding: 6px 10px;
                 font-size: 13px;
                 font-weight: bold;
-                min-width: 120px;
             }
             QDateEdit:focus {
                 border: 2px solid #BFA2DB;
@@ -55,49 +58,59 @@ class HistorialView(QWidget):
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
                 width: 24px;
-                border-left: none;
+                border-left: 1px solid #4A4A5A;
+                background-color: #3A3A4A;
+                border-top-right-radius: 6px;
+                border-bottom-right-radius: 6px;
             }
-            /* Estilos del Calendario Desplegable */
+            QDateEdit::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 6px solid #BFA2DB;
+                width: 0;
+                height: 0;
+            }
+            /* Calendario Popup */
             QCalendarWidget QWidget {
-                background-color: #FFFFFF;
-                color: #1E1E24;
-            }
-            QCalendarWidget QToolButton {
-                color: #1E1E24;
-                font-weight: bold;
-                background-color: #F4F4F9;
-                border: none;
-                border-radius: 4px;
-                padding: 4px;
-            }
-            QCalendarWidget QToolButton:hover {
-                background-color: #BFA2DB;
-            }
-            QCalendarWidget QMenu {
-                background-color: #FFFFFF;
-                color: #1E1E24;
-            }
-            QCalendarWidget QSpinBox {
-                background-color: #FFFFFF;
-                color: #1E1E24;
+                alternate-background-color: #2D2D3A;
+                background-color: #1E1E24;
+                color: #FFFFFF;
             }
             QCalendarWidget QAbstractItemView:enabled {
-                color: #1E1E24;
+                color: #FFFFFF;
                 selection-background-color: #BFA2DB;
                 selection-color: #1E1E24;
             }
         """
+
+        lbl_desde = QLabel("Desde:")
+        lbl_desde.setStyleSheet("color: #FFFFFF; font-weight: bold; font-size: 13px;")
+        
+        self.date_desde = QDateEdit()
+        self.date_desde.setCalendarPopup(True)
+        self.date_desde.setDate(QDate.currentDate())
+        self.date_desde.setDisplayFormat("dd/MM/yyyy")
         self.date_desde.setStyleSheet(estilo_fecha)
+
+        lbl_hasta = QLabel("Hasta:")
+        lbl_hasta.setStyleSheet("color: #FFFFFF; font-weight: bold; font-size: 13px;")
+
+        self.date_hasta = QDateEdit()
+        self.date_hasta.setCalendarPopup(True)
+        self.date_hasta.setDate(QDate.currentDate())
+        self.date_hasta.setDisplayFormat("dd/MM/yyyy")
         self.date_hasta.setStyleSheet(estilo_fecha)
 
-        self.btn_filtrar = QPushButton("🔍  Filtrar")
+        # Botón Buscar / Filtrar con buen contraste
+        self.btn_filtrar = QPushButton("🔍 Filtrar")
         self.btn_filtrar.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_filtrar.setStyleSheet("""
             QPushButton {
                 background-color: #BFA2DB;
                 color: #1E1E24;
                 border: none;
-                padding: 9px 20px;
+                padding: 7px 16px;
                 border-radius: 6px;
                 font-weight: bold;
                 font-size: 13px;
@@ -105,193 +118,211 @@ class HistorialView(QWidget):
             QPushButton:hover { background-color: #A888CB; }
             QPushButton:pressed { background-color: #9370DB; color: white; }
         """)
-        self.btn_filtrar.clicked.connect(self.aplicar_filtro)
+        self.btn_filtrar.clicked.connect(self.aplicar_filtro_fechas)
 
-        self.btn_todos = QPushButton("Ver Todos")
-        self.btn_todos.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_todos.setStyleSheet("""
+        # Botones Rápidos (Hoy, Este Mes)
+        self.btn_hoy = QPushButton("Hoy")
+        self.btn_mes = QPushButton("Este Mes")
+        
+        estilo_btn_rapido = """
             QPushButton {
                 background-color: #3A3A4A;
                 color: #FFFFFF;
-                border: 1px solid #5A5A6A;
-                padding: 9px 18px;
+                border: 1px solid #4A4A5A;
+                padding: 7px 14px;
                 border-radius: 6px;
+                font-size: 12px;
                 font-weight: bold;
+            }
+            QPushButton:hover { background-color: #4A4A5A; border-color: #BFA2DB; }
+        """
+        self.btn_hoy.setStyleSheet(estilo_btn_rapido)
+        self.btn_mes.setStyleSheet(estilo_btn_rapido)
+        self.btn_hoy.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_mes.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self.btn_hoy.clicked.connect(self.filtrar_hoy)
+        self.btn_mes.clicked.connect(self.filtrar_mes)
+
+        # Buscador por Folio / Ticket
+        self.search_folio = QLineEdit()
+        self.search_folio.setPlaceholderText("Buscar por Folio / Boleta...")
+        self.search_folio.setStyleSheet("""
+            QLineEdit {
+                background-color: #1E1E24;
+                color: #FFFFFF;
+                border: 1px solid #4A4A5A;
+                border-radius: 6px;
+                padding: 6px 12px;
                 font-size: 13px;
             }
-            QPushButton:hover { background-color: #4A4A5A; }
+            QLineEdit:focus { border: 2px solid #BFA2DB; }
+            QLineEdit::placeholder { color: #8E8E9F; }
         """)
-        self.btn_todos.clicked.connect(self.cargar_todas_las_ventas)
+        self.search_folio.textChanged.connect(self.filtrar_por_folio)
 
-        filter_layout.addWidget(lbl_desde)
-        filter_layout.addWidget(self.date_desde)
-        filter_layout.addSpacing(6)
-        filter_layout.addWidget(lbl_hasta)
-        filter_layout.addWidget(self.date_hasta)
-        filter_layout.addSpacing(6)
-        filter_layout.addWidget(self.btn_filtrar)
-        filter_layout.addWidget(self.btn_todos)
-        filter_layout.addStretch()
+        # Ensamblar Filtros
+        filtro_layout.addWidget(lbl_desde)
+        filtro_layout.addWidget(self.date_desde)
+        filtro_layout.addWidget(lbl_hasta)
+        filtro_layout.addWidget(self.date_hasta)
+        filtro_layout.addWidget(self.btn_filtrar)
+        filtro_layout.addWidget(self.btn_hoy)
+        filtro_layout.addWidget(self.btn_mes)
+        filtro_layout.addStretch()
+        filtro_layout.addWidget(self.search_folio)
 
-        left_layout.addLayout(filter_layout)
+        layout.addWidget(filtro_container)
 
-        # --- TABLA DE HISTORIAL ---
-        self.tabla_historial = QTableWidget(0, 5)
-        self.tabla_historial.setHorizontalHeaderLabels(["ID Venta", "Fecha", "Hora", "Medio Pago", "Total Monto"])
-        
-        self.tabla_historial.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.tabla_historial.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.tabla_historial.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        # --- 3. TABLA DE HISTORIAL DE VENTAS ---
+        self.tabla = QTableWidget(0, 7)
+        self.tabla.setHorizontalHeaderLabels(["ID", "Folio Ticket", "Fecha", "Hora", "Cajero / Turno", "Medio de Pago", "Total Venta"])
+        self.tabla.verticalHeader().setVisible(False)
+        self.tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.tabla.setColumnHidden(0, True) # Ocultar ID interno
 
-        header = self.tabla_historial.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        
-        self.tabla_historial.setStyleSheet("""
+        header = self.tabla.horizontalHeader()
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Folio
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive) # Fecha
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive) # Hora
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)     # Cajero
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive) # Medio Pago
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Interactive) # Total
+
+        self.tabla.setColumnWidth(1, 130)
+        self.tabla.setColumnWidth(2, 110)
+        self.tabla.setColumnWidth(3, 90)
+        self.tabla.setColumnWidth(5, 130)
+        self.tabla.setColumnWidth(6, 130)
+
+        self.tabla.setAlternatingRowColors(True)
+
+        self.tabla.setStyleSheet("""
             QTableWidget { 
                 background-color: #FFFFFF; 
+                alternate-background-color: #F8F8FC;
                 border: 1px solid #E0E0E0; 
-                border-radius: 8px; 
+                border-radius: 10px;
                 font-size: 13px; 
                 color: #1E1E24; 
-                gridline-color: #F0F0F5;
+                gridline-color: #EEEEEE;
             }
             QHeaderView::section { 
-                background-color: #F4F4F9; 
-                padding: 10px; 
+                background-color: #2D2D3A; 
+                color: #FFFFFF;
+                padding: 12px 10px; 
                 border: none; 
-                border-bottom: 2px solid #E0E0E0; 
                 font-weight: bold; 
-                color: #2D2D3A; 
+                font-size: 13px;
             }
-            QTableWidget::item { padding: 6px; }
-            QTableWidget::item:selected { background-color: #BFA2DB; color: #1E1E24; font-weight: bold; }
-        """)
-        self.tabla_historial.itemSelectionChanged.connect(self.mostrar_detalle_seleccionado)
-
-        left_layout.addWidget(self.tabla_historial)
-
-        # --- PANEL DERECHO: Métricas y Detalle de Productos ---
-        right_frame = QFrame()
-        right_frame.setFixedWidth(340)
-        right_frame.setStyleSheet("""
-            QFrame { background-color: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 12px; } 
-            QLabel { border: none; }
-        """)
-        
-        right_layout = QVBoxLayout(right_frame)
-        right_layout.setContentsMargins(20, 20, 20, 20)
-        right_layout.setSpacing(12)
-
-        titulo_metricas = QLabel("📊 Métricas de Ventas")
-        titulo_metricas.setStyleSheet("font-size: 16px; font-weight: bold; color: #1E1E24;")
-        right_layout.addWidget(titulo_metricas)
-
-        self.lbl_total_recaudado = QLabel("Total Recaudado: $0")
-        self.lbl_cant_ventas = QLabel("Total Ventas: 0")
-        self.lbl_ticket_promedio = QLabel("Ticket Promedio: $0")
-
-        for lbl in [self.lbl_total_recaudado, self.lbl_cant_ventas, self.lbl_ticket_promedio]:
-            lbl.setStyleSheet("font-size: 13px; color: #444; background-color: #F8F8FC; padding: 10px; border-radius: 6px; font-weight: bold;")
-
-        right_layout.addWidget(self.lbl_total_recaudado)
-        right_layout.addWidget(self.lbl_cant_ventas)
-        right_layout.addWidget(self.lbl_ticket_promedio)
-
-        right_layout.addSpacing(10)
-
-        lbl_detalle_titulo = QLabel("🛒 Detalle de Venta Seleccionada:")
-        lbl_detalle_titulo.setStyleSheet("font-size: 14px; font-weight: bold; color: #1E1E24;")
-        right_layout.addWidget(lbl_detalle_titulo)
-
-        self.lista_detalle = QListWidget()
-        self.lista_detalle.setStyleSheet("""
-            QListWidget { 
-                background-color: #FFFFFF; 
-                border: 1px solid #E0E0E0; 
-                border-radius: 6px; 
-                padding: 8px; 
-                font-size: 12px; 
-                color: #333; 
+            QTableWidget::item { padding: 8px; }
+            QTableWidget::item:selected { 
+                background-color: #BFA2DB; 
+                color: #1E1E24; 
+                font-weight: bold;
             }
         """)
-        right_layout.addWidget(self.lista_detalle)
 
-        layout.addLayout(left_layout)
-        layout.addWidget(right_frame)
+        layout.addWidget(self.tabla)
 
-        self.cargar_todas_las_ventas()
+        # Cargar datos iniciales
+        self.cargar_ventas()
+
+    def crear_tarjeta_kpi(self, titulo, valor_inicial, color_borde):
+        card = QWidget()
+        card.setStyleSheet(f"""
+            QWidget {{
+                background-color: #2D2D3A;
+                border-radius: 10px;
+                border-left: 5px solid {color_borde};
+            }}
+        """)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(16, 12, 16, 12)
+        card_layout.setSpacing(4)
+
+        lbl_tit = QLabel(titulo)
+        lbl_tit.setStyleSheet("color: #A0A0B0; font-size: 12px; font-weight: bold;")
+
+        lbl_val = QLabel(valor_inicial)
+        lbl_val.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold;")
+
+        if "Transacciones" in titulo:
+            self.lbl_total_transacciones = lbl_val
+        elif "Recaudado" in titulo:
+            self.lbl_total_recaudado = lbl_val
+
+        card_layout.addWidget(lbl_tit)
+        card_layout.addWidget(lbl_val)
+        return card
 
     def showEvent(self, event):
-        """Refresco automático al ingresar a la vista de Historial."""
         super().showEvent(event)
-        self.cargar_todas_las_ventas()
+        self.cargar_ventas()
 
-    def cargar_todas_las_ventas(self):
-        exito, resultado = obtener_historial_ventas()
-        if exito:
-            self.poblar_tabla_y_metricas(resultado)
-
-    def aplicar_filtro(self):
-        f_inicio = self.date_desde.date().toString("yyyy-MM-dd")
-        f_fin = self.date_hasta.date().toString("yyyy-MM-dd")
+    def cargar_ventas(self, lista_ventas=None):
+        """Llena la tabla y recalcula los totales."""
+        self.tabla.setRowCount(0)
         
-        exito, resultado = obtener_historial_ventas(f_inicio, f_fin)
-        if exito:
-            self.poblar_tabla_y_metricas(resultado)
-
-    def poblar_tabla_y_metricas(self, ventas):
-        self.tabla_historial.setRowCount(0)
-        self.lista_detalle.clear()
+        # Simulación / Consulta de ventas (conectar a tu service cuando esté listo)
+        ventas = lista_ventas if lista_ventas is not None else []
         
-        total_monto_acumulado = 0.0
-        cantidad_ventas = len(ventas)
+        total_acumulado = 0.0
 
-        for fila_idx, venta in enumerate(ventas):
-            self.tabla_historial.insertRow(fila_idx)
+        for fila_idx, v in enumerate(ventas):
+            self.tabla.insertRow(fila_idx)
             
-            es_dict = isinstance(venta, dict)
-            id_v = str(venta["id_venta"] if es_dict else venta[0])
-            fecha = str(venta["fecha"] if es_dict else venta[1])
-            hora = str(venta["hora"] if es_dict else venta[2])
-            medio = str(venta["medio_pago"] if es_dict else venta[3])
-            monto_val = float(venta["total_monto"] if es_dict else venta[4])
-            
-            total_monto_acumulado += monto_val
-            monto_str = f"${monto_val:,.0f}".replace(',', '.')
+            es_dict = isinstance(v, dict)
+            monto = float(v["total_monto"] if es_dict else v[5])
+            total_acumulado += monto
 
-            for col_idx, val in enumerate([f"V-{id_v}", fecha, hora, medio, monto_str]):
-                item = QTableWidgetItem(val)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.tabla_historial.setItem(fila_idx, col_idx, item)
+            celdas = [
+                str(v["id_venta"] if es_dict else v[0]),
+                str(v["folio"] if es_dict else f"TCK-{1000 + (v['id_venta'] if es_dict else v[0])}"),
+                str(v["fecha"] if es_dict else v[1]),
+                str(v["hora"] if es_dict else v[2]),
+                str(v["cajero"] if es_dict else "Caja Principal"),
+                str(v["medio_pago"] if es_dict else "Efectivo"),
+                f"${monto:,.0f}".replace(',', '.')
+            ]
 
-        # Cálculo de Métricas
-        ticket_prom = (total_monto_acumulado / cantidad_ventas) if cantidad_ventas > 0 else 0.0
-        
-        self.lbl_total_recaudado.setText(f"💰 Total Recaudado: ${total_monto_acumulado:,.0f}".replace(',', '.'))
-        self.lbl_cant_ventas.setText(f"🧾 Total Ventas: {cantidad_ventas}")
-        self.lbl_ticket_promedio.setText(f"📈 Ticket Promedio: ${ticket_prom:,.0f}".replace(',', '.'))
+            for col_idx, valor in enumerate(celdas):
+                item = QTableWidgetItem(valor)
+                if col_idx in [1, 2, 3, 5]:
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                elif col_idx == 6: # Monto Venta
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                else:
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                
+                self.tabla.setItem(fila_idx, col_idx, item)
 
-    def mostrar_detalle_seleccionado(self):
-        fila = self.tabla_historial.currentRow()
-        if fila < 0:
-            return
+        if hasattr(self, 'lbl_total_transacciones'):
+            self.lbl_total_transacciones.setText(str(len(ventas)))
+        if hasattr(self, 'lbl_total_recaudado'):
+            self.lbl_total_recaudado.setText(f"${total_acumulado:,.0f}".replace(',', '.'))
 
-        id_texto = self.tabla_historial.item(fila, 0).text()
-        id_venta = int(id_texto.replace("V-", ""))
+    def filtrar_hoy(self):
+        hoy = QDate.currentDate()
+        self.date_desde.setDate(hoy)
+        self.date_hasta.setDate(hoy)
+        self.aplicar_filtro_fechas()
 
-        self.lista_detalle.clear()
-        exito, items = obtener_detalle_historial(id_venta)
-        
-        if exito:
-            for item in items:
-                es_dict = isinstance(item, dict)
-                sku = item["sku"] if es_dict else item[0]
-                nombre = item["nombre_producto"] if es_dict else item[1]
-                cant = float(item["cantidad"] if es_dict else item[2])
-                unid = item["unidad_medida"] if es_dict else item[3]
-                subtotal = float(item["subtotal"] if es_dict else item[5])
+    def filtrar_mes(self):
+        hoy = QDate.currentDate()
+        primer_dia_mes = QDate(hoy.year(), hoy.month(), 1)
+        self.date_desde.setDate(primer_dia_mes)
+        self.date_hasta.setDate(hoy)
+        self.aplicar_filtro_fechas()
 
-                cant_str = f"{cant:.3f} kg" if unid in ["KG", "LT", "GR"] else f"{int(cant)} un"
-                subtotal_str = f"${subtotal:,.0f}".replace(',', '.')
+    def aplicar_filtro_fechas(self):
+        desde_str = self.date_desde.date().toString("yyyy-MM-dd")
+        hasta_str = self.date_hasta.date().toString("yyyy-MM-dd")
+        # Aquí conectas con tu función SQL: buscar_ventas_por_rango(desde_str, hasta_str)
+        self.cargar_ventas([])
 
-                self.lista_detalle.addItem(f"• [{sku}] {nombre}\n   Cant: {cant_str} | Total: {subtotal_str}")
+    def filtrar_por_folio(self, texto):
+        # Lógica de búsqueda reactiva por boleta/folio
+        pass
