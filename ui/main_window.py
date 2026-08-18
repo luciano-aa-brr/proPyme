@@ -157,7 +157,7 @@ class MainWindow(QMainWindow):
 
         self.vista_inventario = InventarioView()
         self.vista_venta = VentasView() 
-        self.vista_caja = CajaView() 
+        self.vista_caja = CajaView(usuario_actual=self.usuario_actual)
         self.vista_historial = HistorialView()
 
         self.stacked_widget.addWidget(self.vista_inventario) # Índice 0
@@ -203,7 +203,7 @@ class MainWindow(QMainWindow):
             else:
                 btn.setStyleSheet(self.estilo_base)
 
-        # Disparar actualización en vivo según la pestaña a la que se ingresa
+        # Refrescar datos en vivo al entrar a cada pestaña
         if indice == 0 and hasattr(self.vista_inventario, 'cargar_datos_tabla'):
             self.vista_inventario.cargar_datos_tabla()
         elif indice == 1 and hasattr(self.vista_venta, 'search_input'):

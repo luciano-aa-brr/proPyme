@@ -2,11 +2,13 @@ import sqlite3
 from datetime import date, datetime
 from database.connection import get_connection
 
-def inicializar_tablas_movimientos_caja():
-    """Crea la tabla de movimientos/gastos y configuración de caja si no existen."""
+def inicializar_tablas_caja_y_auditoria():
+    """Crea las tablas de movimientos, configuración y auditoría de cierres."""
     try:
         conn = get_connection()
         cursor = conn.cursor()
+
+        # Tabla de movimientos manuales de caja (inyecciones y retiros)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS movimientos_caja (
                 id_movimiento INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -19,6 +21,7 @@ def inicializar_tablas_movimientos_caja():
             )
         """)
         
+        # Configuración persistente del fondo base
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS config_caja (
                 clave TEXT PRIMARY KEY,
@@ -26,138 +29,42 @@ def inicializar_tablas_movimientos_caja():
             )
         """)
         cursor.execute("INSERT OR IGNORE INTO config_caja (clave, valor) VALUES ('fondo_base', 50000.0)")
+
+        # Tabla histórica de cierres de caja para auditorías
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS cierres_caja (
+                id_cierre INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha_cierre TEXT NOT NULL,
+                hora_cierre TEXT NOT NULL,
+                usuario_cierre TEXT NOT NULL,
+                fondo_inicial REAL NOT NULL,
+                ventas_efectivo REAL NOT NULL,
+                ventas_debito REAL NOT NULL,
+                ventas_credito REAL NOT NULL,
+                ventas_transferencia REAL NOT NULL,
+                total_ventas REAL NOT NULL,
+                total_ingresos_extra REAL NOT NULL,
+                total_retiros REAL NOT NULL,
+                efectivo_teorico REAL NOT NULL,
+                efectivo_real_declarado REAL NOT NULL,
+                diferencia_efectivo REAL NOT NULL,
+                estado_cuadre TEXT NOT NULL,
+                observaciones TEXT
+            )
+        """)
         
         conn.commit()
     except Exception as e:
-        print(f"Error al inicializar tablas de movimientos de caja: {e}")
+        print(f"Error al inicializar tablas de caja: {e}")
     finally:
         if 'conn' in locals() and conn:
             conn.close()
 
 # Ejecutar inicialización al importar
-inicializar_tablas_movimientos_caja()
+inicializar_tablas_caja_y_auditoria()
 
-
-# ========================================================
-# SECCIÓN 1: COMPATIBILIDAD CON FLUJO PREVIO DE VENTAS/COBROS
-# ========================================================
-
-def obtener_ventas_pendientes():
-    """
-    Obtiene las ventas registradas que aún no tienen un pago procesado en la tabla 'caja'.
-    """
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        query = """
-            SELECT v.id_venta, v.fecha, v.hora, v.total_monto 
-            FROM ventas v
-            LEFT JOIN caja c ON v.id_venta = c.id_venta
-            WHERE c.id_caja IS NULL
-            ORDER BY v.id_venta DESC
-        """
-        cursor.execute(query)
-        ventas = cursor.fetchall()
-        return True, ventas
-    except Exception as e:
-        return False, f"Error al consultar ventas pendientes: {str(e)}"
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
-
-
-def obtener_detalle_venta(id_venta):
-    """
-    Obtiene los ítems/productos asociados a un ID de venta.
-    """
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        query = """
-            SELECT p.nombre_producto, vi.cantidad, p.unidad_medida, vi.valor_final, vi.subtotal
-            FROM venta_items vi
-            JOIN productos p ON vi.id_producto = p.id_producto
-            WHERE vi.id_venta = ?
-        """
-        cursor.execute(query, (id_venta,))
-        items = cursor.fetchall()
-        return True, items
-    except Exception as e:
-        return False, f"Error al obtener detalle de la venta: {str(e)}"
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
-
-
-def procesar_cobro_caja(id_venta, total_monto, medio_pago):
-    """
-    Registra el pago de una venta en la tabla 'caja'.
-    """
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        query = """
-            INSERT INTO caja (
-                id_venta, total_monto, descuento_final, total_pagar, 
-                medio_pago, impuesto_monto, monto_venta, descuentos_totales
-            ) VALUES (?, ?, 0.0, ?, ?, 0.0, ?, 0.0)
-        """
-        cursor.execute(query, (id_venta, total_monto, total_monto, medio_pago, total_monto))
-        conn.commit()
-        return True, "Cobro procesado e ingresado a caja con éxito."
-    except sqlite3.IntegrityError:
-        return False, "Esta venta ya fue cobrada previamente."
-    except Exception as e:
-        return False, f"Error al procesar el cobro: {str(e)}"
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
-
-
-def obtener_arqueo_actual():
-    """
-    Calcula los totales cobrados agrupados por medio de pago.
-    """
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        query = """
-            SELECT medio_pago, SUM(total_pagar) as total
-            FROM caja
-            GROUP BY medio_pago
-        """
-        cursor.execute(query)
-        totales = cursor.fetchall()
-        
-        resumen = {"Efectivo": 0.0, "Débito": 0.0, "Crédito": 0.0, "Transferencia": 0.0}
-        total_general = 0.0
-        
-        for fila in totales:
-            medio = fila["medio_pago"] if isinstance(fila, dict) else fila[0]
-            monto = float(fila["total"] if isinstance(fila, dict) else fila[1])
-            if medio in resumen:
-                resumen[medio] = monto
-            total_general += monto
-            
-        resumen["Total"] = total_general
-        return True, resumen
-    except Exception as e:
-        return False, f"Error al calcular el arqueo: {str(e)}"
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
-
-
-# ========================================================
-# SECCIÓN 2: CONTROL FINANCIERO, FONDO BASE Y MOVIMIENTOS
-# ========================================================
 
 def obtener_fondo_base():
-    """Retorna el monto configurado como fondo base en caja."""
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -174,7 +81,6 @@ def obtener_fondo_base():
 
 
 def ajustar_fondo_inicial(nuevo_fondo):
-    """Actualiza el fondo base y deja constancia en auditoría."""
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -186,7 +92,7 @@ def ajustar_fondo_inicial(nuevo_fondo):
             VALUES (?, ?, 'FONDO', ?, 'Ajuste de Fondo Base', 'Administrador')
         """, (fecha_actual, hora_actual, nuevo_fondo))
         conn.commit()
-        return True, "Fondo base actualizado."
+        return True, "Fondo base actualizado con éxito."
     except Exception as e:
         return False, str(e)
     finally:
@@ -195,7 +101,6 @@ def ajustar_fondo_inicial(nuevo_fondo):
 
 
 def registrar_movimiento(tipo, monto, motivo, usuario="Administrador"):
-    """Registra entradas extraordinarias o salidas/gastos de gaveta."""
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -215,7 +120,6 @@ def registrar_movimiento(tipo, monto, motivo, usuario="Administrador"):
 
 
 def obtener_resumen_caja():
-    fecha_hoy = date.today().strftime('%Y-%m-%d')
     fondo_base = obtener_fondo_base()
     
     resumen = {
@@ -232,22 +136,13 @@ def obtener_resumen_caja():
         conn = get_connection()
         cursor = conn.cursor()
 
-        # 1. Consultar directamente de la tabla 'caja'
-        # Usamos LEFT JOIN con ventas por si se requiere validar fecha, o sumamos directo de caja
-        query_ventas = """
-            SELECT c.medio_pago, COALESCE(SUM(c.total_pagar), 0) AS total
-            FROM caja c
-            LEFT JOIN ventas v ON c.id_venta = v.id_venta
-            WHERE v.fecha = ? OR v.fecha IS NULL
-            GROUP BY c.medio_pago
-        """
-        cursor.execute(query_ventas, (fecha_hoy,))
+        # 1. Totalizar ventas registradas en la tabla 'caja'
+        cursor.execute("""
+            SELECT medio_pago, COALESCE(SUM(total_pagar), 0) AS total
+            FROM caja
+            GROUP BY medio_pago
+        """)
         ventas = cursor.fetchall()
-
-        # Si no arrojó resultados con la fecha de hoy, consultar el acumulado directo de caja
-        if not ventas:
-            cursor.execute("SELECT medio_pago, COALESCE(SUM(total_pagar), 0) AS total FROM caja GROUP BY medio_pago")
-            ventas = cursor.fetchall()
 
         v_efectivo = 0.0
         for row in ventas:
@@ -263,13 +158,12 @@ def obtener_resumen_caja():
             elif mp == "Transferencia":
                 resumen["transferencia"] += total
 
-        # 2. Consultar movimientos manuales
-        query_movs = """
+        # 2. Consultar movimientos del turno
+        cursor.execute("""
             SELECT hora, tipo, monto, motivo, usuario 
             FROM movimientos_caja 
             ORDER BY id_movimiento DESC
-        """
-        cursor.execute(query_movs)
+        """)
         movs = cursor.fetchall()
 
         ingresos_extra = 0.0
@@ -303,6 +197,96 @@ def obtener_resumen_caja():
     except Exception as e:
         print(f"Error al obtener resumen de caja: {e}")
         return resumen
+    finally:
+        if 'conn' in locals() and conn:
+            conn.close()
+
+
+def procesar_cierre_turno(efectivo_declarado, observaciones="", usuario="Administrador"):
+    """
+    Registra el acta contable de cierre de caja y reinicia los contadores para el nuevo turno.
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # 1. Obtener estado teórico
+        resumen = obtener_resumen_caja()
+        fondo = resumen["fondo_base"]
+        teorico_efectivo = resumen["efectivo_caja"]
+        v_debito = resumen["debito"]
+        v_credito = resumen["credito"]
+        v_transf = resumen["transferencia"]
+        v_total = resumen["total_turno"]
+        v_efectivo = v_total - (v_debito + v_credito + v_transf)
+
+        ingresos_extra = sum(m["monto"] for m in resumen["movimientos"] if m["tipo"] == "INGRESO")
+        retiros = sum(m["monto"] for m in resumen["movimientos"] if m["tipo"] == "RETIRO")
+
+        # 2. Calcular descuadre
+        diferencia = efectivo_declarado - teorico_efectivo
+        if diferencia == 0:
+            estado_cuadre = "CUADRADO"
+        elif diferencia > 0:
+            estado_cuadre = f"SOBRANTE (+${diferencia:,.0f})".replace(',', '.')
+        else:
+            estado_cuadre = f"FALTANTE (-${abs(diferencia):,.0f})".replace(',', '.')
+
+        fecha_cierre = date.today().strftime('%Y-%m-%d')
+        hora_cierre = datetime.now().strftime('%H:%M:%S')
+
+        # 3. Insertar snapshot en la tabla de auditoría
+        cursor.execute("""
+            INSERT INTO cierres_caja (
+                fecha_cierre, hora_cierre, usuario_cierre, fondo_inicial,
+                ventas_efectivo, ventas_debito, ventas_credito, ventas_transferencia,
+                total_ventas, total_ingresos_extra, total_retiros, efectivo_teorico,
+                efectivo_real_declarado, diferencia_efectivo, estado_cuadre, observaciones
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            fecha_cierre, hora_cierre, usuario, fondo,
+            v_efectivo, v_debito, v_credito, v_transf,
+            v_total, ingresos_extra, retiros, teorico_efectivo,
+            efectivo_declarado, diferencia, estado_cuadre, observaciones
+        ))
+
+        # 4. Limpiar los registros temporales del turno cerrado
+        cursor.execute("DELETE FROM movimientos_caja")
+        cursor.execute("DELETE FROM caja")
+
+        conn.commit()
+
+        return True, {
+            "estado_cuadre": estado_cuadre,
+            "diferencia": diferencia,
+            "teorico": teorico_efectivo,
+            "declarado": efectivo_declarado,
+            "total_ventas": v_total
+        }
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        return False, f"Error al procesar el cierre: {str(e)}"
+    finally:
+        if conn:
+            conn.close()
+
+
+def obtener_historial_cierres():
+    """
+    Retorna la lista histórica de todos los cierres de caja guardados para auditoría.
+    """
+    try:
+        conn = get_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM cierres_caja ORDER BY id_cierre DESC")
+        filas = cursor.fetchall()
+        return True, [dict(f) for f in filas]
+    except Exception as e:
+        return False, f"Error al consultar historial de cierres: {str(e)}"
     finally:
         if 'conn' in locals() and conn:
             conn.close()
