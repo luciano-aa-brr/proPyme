@@ -444,7 +444,7 @@ class VentasView(QWidget):
             self.agregar_producto_al_carrito(producto)
             self.search_input.clear()
         else:
-            QMessageBox.warning(self, "No Encontrado", producto)
+            QMessageBox.warning(self, "No Encontrado", str(producto))
             self.search_input.selectAll()
 
         self.search_input.setFocus()
@@ -458,15 +458,13 @@ class VentasView(QWidget):
         unidad = (producto["unidad_medida"] or "UN").upper()
         stock_disp = float(producto.get("stock_actual", 0))
 
-        # Validación de stock cero
         if stock_disp <= 0:
-            QMessageBox.warning(self, "Sin Stock", f"El producto '{nombre}' no tiene unidades disponibles en inventario.")
+            QMessageBox.warning(self, "Sin Stock", f"El producto '{nombre}' no tiene existencias disponibles.")
             return
 
-        # Calcular cuánto ya se tiene en el carrito
         cant_actual_carrito = sum(it["cantidad"] for it in self.carrito if it["id_producto"] == id_prod)
 
-        # Si el producto es por PESO (KG, GR, LT)
+        # Manejo de productos a granel / balanza
         if unidad in ["KG", "LT", "GR"]:
             dialogo = DialogoPeso(nombre, valor_final, unidad, self)
             if dialogo.exec() == QDialog.DialogCode.Accepted:
@@ -475,7 +473,7 @@ class VentasView(QWidget):
                     QMessageBox.warning(
                         self, 
                         "Stock Insuficiente", 
-                        f"No puedes agregar {peso:.3f} {unidad.lower()}. Stock disponible: {stock_disp:.3f} (Ya tienes {cant_actual_carrito:.3f} en el carrito)."
+                        f"No puedes agregar {peso:.3f} {unidad.lower()}. Stock disponible: {stock_disp:.3f} (En carrito: {cant_actual_carrito:.3f})."
                     )
                     return
 
@@ -498,12 +496,12 @@ class VentasView(QWidget):
                 self.renderizar_carrito()
             return
 
-        # Para productos por UNIDAD estándar
+        # Productos estándar por unidad
         if cant_actual_carrito + 1.0 > stock_disp:
             QMessageBox.warning(
                 self, 
                 "Stock Insuficiente", 
-                f"No puedes agregar más unidades. Stock disponible: {int(stock_disp)} (Ya tienes {int(cant_actual_carrito)} en el carrito)."
+                f"No puedes agregar más unidades. Stock disponible: {int(stock_disp)} (En carrito: {int(cant_actual_carrito)})."
             )
             return
 
@@ -534,7 +532,7 @@ class VentasView(QWidget):
             nuevo_peso = dialogo.peso_ingresado
             stock_disp = item.get("stock_max", 999999)
             if nuevo_peso > stock_disp:
-                QMessageBox.warning(self, "Stock Insuficiente", f"El peso ingresado excede el stock disponible ({stock_disp:.3f} {item['unidad'].lower()}).")
+                QMessageBox.warning(self, "Stock Insuficiente", f"El peso ingresado supera el stock ({stock_disp:.3f} {item['unidad'].lower()}).")
                 return
             self.carrito[fila_idx]["cantidad"] = nuevo_peso
             self.renderizar_carrito()
@@ -556,7 +554,6 @@ class VentasView(QWidget):
             nom_it = QTableWidgetItem(item["nombre"])
             nom_it.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
-            # Celda interactiva de Cantidad / Peso
             box_cant = QWidget()
             layout_cant = QHBoxLayout(box_cant)
             layout_cant.setContentsMargins(2, 2, 2, 2)
@@ -608,7 +605,6 @@ class VentasView(QWidget):
             sub_it = QTableWidgetItem(f"${subtotal:,.0f}".replace(',', '.'))
             sub_it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-            # Botón Eliminar
             btn_del = QPushButton("❌")
             btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_del.setStyleSheet("background: transparent; border: none; font-size: 13px;")
