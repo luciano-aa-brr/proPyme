@@ -379,7 +379,7 @@ class ModalHistorialCierres(QDialog):
             "Efectivo Real", "Diferencia", "Estado Cuadre"
         ])
         self.tabla.verticalHeader().setVisible(False)
-        self.tabla.verticalHeader().setDefaultSectionSize(40)  # Altura adecuada para badges
+        self.tabla.verticalHeader().setDefaultSectionSize(40)
         self.tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabla.setAlternatingRowColors(True)

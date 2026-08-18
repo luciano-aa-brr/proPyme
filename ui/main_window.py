@@ -156,7 +156,7 @@ class MainWindow(QMainWindow):
         self.stacked_widget = QStackedWidget() 
 
         self.vista_inventario = InventarioView()
-        self.vista_venta = VentasView() 
+        self.vista_venta = VentasView(usuario_actual=self.usuario_actual) 
         self.vista_caja = CajaView(usuario_actual=self.usuario_actual)
         self.vista_historial = HistorialView()
 

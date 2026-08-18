@@ -117,9 +117,10 @@ class DialogoPeso(QDialog):
 
 
 class VentasView(QWidget):
-    def __init__(self):
+    def __init__(self, usuario_actual=None):
         super().__init__()
 
+        self.usuario_actual = usuario_actual or {"nombre": "Administrador", "rol": "Administrador"}
         self.carrito = []
         self.medio_pago_seleccionado = "Efectivo"
 
@@ -455,12 +456,29 @@ class VentasView(QWidget):
         precio_base = float(producto["precio_venta_base"])
         valor_final = float(producto["valor_final"])
         unidad = (producto["unidad_medida"] or "UN").upper()
+        stock_disp = float(producto.get("stock_actual", 0))
 
-        # Si el producto es por PESO (KG, GR, LT), abrir diálogo de báscula express
+        # Validación de stock cero
+        if stock_disp <= 0:
+            QMessageBox.warning(self, "Sin Stock", f"El producto '{nombre}' no tiene unidades disponibles en inventario.")
+            return
+
+        # Calcular cuánto ya se tiene en el carrito
+        cant_actual_carrito = sum(it["cantidad"] for it in self.carrito if it["id_producto"] == id_prod)
+
+        # Si el producto es por PESO (KG, GR, LT)
         if unidad in ["KG", "LT", "GR"]:
             dialogo = DialogoPeso(nombre, valor_final, unidad, self)
             if dialogo.exec() == QDialog.DialogCode.Accepted:
                 peso = dialogo.peso_ingresado
+                if cant_actual_carrito + peso > stock_disp:
+                    QMessageBox.warning(
+                        self, 
+                        "Stock Insuficiente", 
+                        f"No puedes agregar {peso:.3f} {unidad.lower()}. Stock disponible: {stock_disp:.3f} (Ya tienes {cant_actual_carrito:.3f} en el carrito)."
+                    )
+                    return
+
                 for item in self.carrito:
                     if item["id_producto"] == id_prod:
                         item["cantidad"] += peso
@@ -474,12 +492,21 @@ class VentasView(QWidget):
                     "precio_base": precio_base,
                     "valor_final": valor_final,
                     "cantidad": peso,
-                    "unidad": unidad
+                    "unidad": unidad,
+                    "stock_max": stock_disp
                 })
                 self.renderizar_carrito()
             return
 
         # Para productos por UNIDAD estándar
+        if cant_actual_carrito + 1.0 > stock_disp:
+            QMessageBox.warning(
+                self, 
+                "Stock Insuficiente", 
+                f"No puedes agregar más unidades. Stock disponible: {int(stock_disp)} (Ya tienes {int(cant_actual_carrito)} en el carrito)."
+            )
+            return
+
         for item in self.carrito:
             if item["id_producto"] == id_prod:
                 item["cantidad"] += 1.0
@@ -493,7 +520,8 @@ class VentasView(QWidget):
             "precio_base": precio_base,
             "valor_final": valor_final,
             "cantidad": 1.0,
-            "unidad": "UN"
+            "unidad": "UN",
+            "stock_max": stock_disp
         })
         self.renderizar_carrito()
 
@@ -503,7 +531,12 @@ class VentasView(QWidget):
         dialogo.inp_peso.setText(str(item["cantidad"]))
         dialogo.inp_peso.selectAll()
         if dialogo.exec() == QDialog.DialogCode.Accepted:
-            self.carrito[fila_idx]["cantidad"] = dialogo.peso_ingresado
+            nuevo_peso = dialogo.peso_ingresado
+            stock_disp = item.get("stock_max", 999999)
+            if nuevo_peso > stock_disp:
+                QMessageBox.warning(self, "Stock Insuficiente", f"El peso ingresado excede el stock disponible ({stock_disp:.3f} {item['unidad'].lower()}).")
+                return
+            self.carrito[fila_idx]["cantidad"] = nuevo_peso
             self.renderizar_carrito()
 
     def renderizar_carrito(self):
@@ -594,8 +627,13 @@ class VentasView(QWidget):
 
     def modificar_cantidad(self, indice, delta):
         if 0 <= indice < len(self.carrito):
-            self.carrito[indice]["cantidad"] += delta
-            if self.carrito[indice]["cantidad"] <= 0:
+            item = self.carrito[indice]
+            nueva_cant = item["cantidad"] + delta
+            if delta > 0 and nueva_cant > item.get("stock_max", 999999):
+                QMessageBox.warning(self, "Stock Insuficiente", f"No hay más stock disponible para '{item['nombre']}'.")
+                return
+            item["cantidad"] = nueva_cant
+            if item["cantidad"] <= 0:
                 self.carrito.pop(indice)
             self.renderizar_carrito()
 
@@ -664,7 +702,6 @@ class VentasView(QWidget):
                 self.inp_recibido.setFocus()
                 return
 
-        # Mapear exactamente lo que pide registrar_venta_directa
         payload_carrito = []
         for it in self.carrito:
             payload_carrito.append({
@@ -675,13 +712,15 @@ class VentasView(QWidget):
                 "subtotal": it["cantidad"] * it["valor_final"]
             })
 
-        exito, resultado = registrar_venta_directa(payload_carrito, self.medio_pago_seleccionado)
+        cajero_nom = self.usuario_actual.get("nombre", "Cajero")
+
+        exito, resultado = registrar_venta_directa(payload_carrito, self.medio_pago_seleccionado, usuario=cajero_nom)
 
         if exito:
             QMessageBox.information(
                 self, 
                 "Venta Exitosa", 
-                f"Venta #{resultado} procesada correctamente.\nTotal: ${total:,.0f} ({self.medio_pago_seleccionado})"
+                f"Venta #{resultado} procesada correctamente por {cajero_nom}.\nTotal: ${total:,.0f} ({self.medio_pago_seleccionado})"
             )
             self.limpiar_venta()
         else:
