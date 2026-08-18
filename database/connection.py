@@ -44,7 +44,9 @@ def init_db():
             total_valor_final REAL NOT NULL,
             descuento_general REAL DEFAULT 0,
             total_monto REAL NOT NULL,
-            turno TEXT NOT NULL
+            turno TEXT NOT NULL,
+            id_usuario INTEGER,
+            FOREIGN KEY (id_usuario) REFERENCES usuarios(id_usuario)
         )
     ''')
 
@@ -78,6 +80,33 @@ def init_db():
             FOREIGN KEY (id_venta) REFERENCES ventas(id_venta)
         )
     ''')
+
+    # 5. Tabla: USUARIOS (Control de Roles y Accesos)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id_usuario INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            pin_seguridad TEXT NOT NULL,
+            rol TEXT NOT NULL DEFAULT 'Vendedor',
+            estado TEXT DEFAULT 'Activo',
+            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Inserción inicial de usuarios por defecto (solo si la tabla está vacía)
+    cursor.execute('SELECT COUNT(*) FROM usuarios')
+    total_usuarios = cursor.fetchone()[0]
+    
+    if total_usuarios == 0:
+        usuarios_iniciales = [
+            ("Administrador", "1234", "Administrador"),
+            ("Cajero 1", "0000", "Vendedor")
+        ]
+        cursor.executemany('''
+            INSERT INTO usuarios (nombre, pin_seguridad, rol)
+            VALUES (?, ?, ?)
+        ''', usuarios_iniciales)
+        print("Usuarios base creados: Admin (PIN: 1234), Cajero (PIN: 0000)")
 
     conn.commit()
     conn.close()

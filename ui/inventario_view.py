@@ -13,7 +13,7 @@ class InventarioView(QWidget):
     def __init__(self):
         super().__init__()
         
-        # Estado para Paginación de alto rendimiento
+        # Estado para Paginación
         self.pagina_actual = 1
         self.items_por_pagina = 50
         self.total_paginas = 1
@@ -23,17 +23,15 @@ class InventarioView(QWidget):
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(16)
 
-        # --- 1. TARJETAS KPI DE RESUMEN ---
+        # --- 1. TARJETAS KPI (Total Productos y Stock Crítico) ---
         kpi_layout = QHBoxLayout()
         kpi_layout.setSpacing(16)
 
-        self.card_total = self.crear_tarjeta_kpi("Total Productos", "0", "#BFA2DB")
-        self.card_critico = self.crear_tarjeta_kpi("Stock Crítico", "0", "#D32F2F")
-        self.card_valor = self.crear_tarjeta_kpi("Valoración Inv. Total", "$0", "#2E7D32")
+        self.card_total = self.crear_tarjeta_kpi("Total Productos", "0", "#BFA2DB", "total")
+        self.card_critico = self.crear_tarjeta_kpi("Stock Crítico", "0", "#D32F2F", "critico")
 
         kpi_layout.addWidget(self.card_total)
         kpi_layout.addWidget(self.card_critico)
-        kpi_layout.addWidget(self.card_valor)
         
         layout.addLayout(kpi_layout)
 
@@ -79,12 +77,11 @@ class InventarioView(QWidget):
 
         layout.addLayout(top_layout)
 
-        # --- 3. TABLA DE DATOS OPTIMIZADA ---
+        # --- 3. TABLA DE DATOS ---
         self.tabla = QTableWidget(0, 7)
         self.tabla.setHorizontalHeaderLabels(["ID", "SKU", "Nombre del Producto", "Categoría", "Precio Base", "Valor Final", "Stock Actual"])
         
         self.tabla.verticalHeader().setVisible(False)
-        
         self.tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -172,7 +169,7 @@ class InventarioView(QWidget):
 
         self.cargar_datos_tabla()
 
-    def crear_tarjeta_kpi(self, titulo, valor_inicial, color_borde):
+    def crear_tarjeta_kpi(self, titulo, valor_inicial, color_borde, tipo_kpi):
         card = QWidget()
         card.setStyleSheet(f"""
             QWidget {{
@@ -191,13 +188,10 @@ class InventarioView(QWidget):
         lbl_val = QLabel(valor_inicial)
         lbl_val.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold;")
         
-        tit_lower = titulo.lower()
-        if "total" in tit_lower:
+        if tipo_kpi == "total":
             self.lbl_val_total = lbl_val
-        elif "crítico" in tit_lower or "critico" in tit_lower:
+        elif tipo_kpi == "critico":
             self.lbl_val_critico = lbl_val
-        elif "valor" in tit_lower or "inv" in tit_lower:
-            self.lbl_val_inv = lbl_val
 
         card_layout.addWidget(lbl_tit)
         card_layout.addWidget(lbl_val)
@@ -211,32 +205,28 @@ class InventarioView(QWidget):
         if lista_productos is None:
             exito, resultado = obtener_todos_los_productos()
             if not exito:
-                QMessageBox.critical(self, "Error de Lectura", resultado)
+                self.mostrar_alerta("Error de Lectura", resultado)
                 return
             self.todos_los_productos_cache = resultado
         else:
             self.todos_los_productos_cache = lista_productos
 
+        # Calcular Stock Crítico
         tot_criticos = 0
-        tot_valorizacion = 0.0
-        
         for p in self.todos_los_productos_cache:
             es_dict = isinstance(p, dict)
             stock = float(p["stock_actual"] if es_dict else p[10])
             stock_min = float(p["stock_minimo"] if es_dict else p[11])
-            val_final = float(p["valor_final"] if es_dict else p[9])
-            
-            tot_valorizacion += (stock * val_final)
             if stock <= stock_min:
                 tot_criticos += 1
 
+        # Actualizar Contadores
         if hasattr(self, 'lbl_val_total'):
             self.lbl_val_total.setText(str(len(self.todos_los_productos_cache)))
         if hasattr(self, 'lbl_val_critico'):
             self.lbl_val_critico.setText(str(tot_criticos))
-        if hasattr(self, 'lbl_val_inv'):
-            self.lbl_val_inv.setText(f"${tot_valorizacion:,.0f}".replace(',', '.'))
 
+        # Paginación
         total_items = len(self.todos_los_productos_cache)
         self.total_paginas = max(1, (total_items + self.items_por_pagina - 1) // self.items_por_pagina)
         self.pagina_actual = min(self.pagina_actual, self.total_paginas)
@@ -358,20 +348,58 @@ class InventarioView(QWidget):
         menu.exec(self.tabla.viewport().mapToGlobal(posicion))
 
     def confirmar_eliminacion(self, id_producto, nombre_producto):
-        respuesta = QMessageBox.question(
-            self, 
-            "Confirmar Eliminación", 
-            f"¿Estás seguro de que deseas eliminar el producto '{nombre_producto}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Confirmar Eliminación")
+        msg.setText(f"¿Estás seguro de que deseas eliminar el producto '{nombre_producto}'?")
+        msg.setIcon(QMessageBox.Icon.Question)
+        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg.setStyleSheet("""
+            QMessageBox { background-color: #FFFFFF; }
+            QLabel { color: #1E1E24; font-size: 13px; font-weight: 500; }
+            QPushButton { 
+                background-color: #EFEFF5; color: #333; border: 1px solid #CCC; 
+                padding: 6px 18px; border-radius: 6px; font-weight: bold; min-width: 70px;
+            }
+            QPushButton:hover { background-color: #BFA2DB; color: #1E1E24; }
+        """)
         
-        if respuesta == QMessageBox.StandardButton.Yes:
+        if msg.exec() == QMessageBox.StandardButton.Yes:
             exito, mensaje = eliminar_producto_logico(id_producto)
             if exito:
                 self.mostrar_mensaje_exito("Éxito", mensaje)
                 self.cargar_datos_tabla()
             else:
-                QMessageBox.warning(self, "Error", mensaje)
+                self.mostrar_alerta("Error", mensaje)
+
+    def mostrar_alerta(self, titulo, mensaje, parent=None):
+        """Muestra una alerta con diseño visible, fondo blanco sólido y buen contraste."""
+        msg = QMessageBox(parent or self)
+        msg.setWindowTitle(titulo)
+        msg.setText(mensaje)
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setStyleSheet("""
+            QMessageBox {
+                background-color: #FFFFFF;
+            }
+            QLabel {
+                color: #1E1E24;
+                font-size: 13px;
+                font-weight: 500;
+            }
+            QPushButton {
+                background-color: #BFA2DB;
+                color: #1E1E24;
+                border: none;
+                padding: 6px 18px;
+                border-radius: 6px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #A888CB;
+            }
+        """)
+        msg.exec()
 
     def mostrar_mensaje_exito(self, titulo, mensaje):
         msg = QMessageBox(self)
@@ -486,13 +514,11 @@ class InventarioView(QWidget):
         inp_nombre.setStyleSheet(estilo_inputs)
         self.inputs["nombre"] = inp_nombre
 
-        # CATEGORÍA EDITABLE CON AUTOCOMPLETADO
         lbl_cat = crear_label("Categoría:")
         cmb_categoria = QComboBox()
         cmb_categoria.setEditable(True)
         cmb_categoria.setStyleSheet(estilo_inputs)
         
-        # Extraer categorías únicas de la lista en caché
         categorias_existentes = sorted(list(set(
             (p["categoria"] if isinstance(p, dict) else p[4]) 
             for p in self.todos_los_productos_cache 
@@ -542,7 +568,7 @@ class InventarioView(QWidget):
         inp_cant_cajas.setStyleSheet(estilo_inputs)
         
         inp_u_por_caja = QLineEdit()
-        inp_u_por_caja.setPlaceholderText("Unid/Caja (ej: 50 u 34)")
+        inp_u_por_caja.setPlaceholderText("Unid/Caja")
         inp_u_por_caja.setStyleSheet(estilo_inputs)
         
         inp_costo_caja = QLineEdit()
@@ -584,7 +610,6 @@ class InventarioView(QWidget):
         inp_stock_min.setStyleSheet(estilo_inputs)
         self.inputs["stock_min"] = inp_stock_min
 
-        # Lógica de cálculo automático por cajas
         def calcular_desde_cajas():
             try:
                 cajas = float(inp_cant_cajas.text().strip()) if inp_cant_cajas.text().strip().replace('.', '').isdigit() else 0.0
@@ -656,10 +681,10 @@ class InventarioView(QWidget):
                 faltantes.append("Precio Venta Base")
 
             if faltantes:
-                QMessageBox.warning(
-                    modal, 
+                self.mostrar_alerta(
                     "Campos Obligatorios Vacíos", 
-                    f"Debes completar los siguientes campos obligatorios:\n\n• " + "\n• ".join(faltantes)
+                    f"Debes completar los siguientes campos obligatorios:\n\n• " + "\n• ".join(faltantes),
+                    parent=modal
                 )
                 return
 
@@ -693,7 +718,7 @@ class InventarioView(QWidget):
                 self.mostrar_mensaje_exito("Éxito", mensaje)
                 self.cargar_datos_tabla()
             else:
-                QMessageBox.warning(modal, "Atención", mensaje)
+                self.mostrar_alerta("Atención", mensaje, parent=modal)
 
         inp_stock_min.returnPressed.connect(intentar_guardar)
 
@@ -726,7 +751,7 @@ class InventarioView(QWidget):
                 border: none; 
                 font-weight: bold; 
                 border-radius: 6px; 
-                font-size: 14px;
+                font-size: 14px; 
             }
             QPushButton:hover { background-color: #A888CB; }
             QPushButton:pressed { background-color: #9370DB; color: white; }
